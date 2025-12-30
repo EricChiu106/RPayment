@@ -5,21 +5,23 @@ from datetime import timedelta  # 確保有引入這行
 app = Flask(__name__)
 app.secret_key = "d2a89f3c71e54b8d9c2e1a6b0f4d8e9a2c3b5f7a9d1c0b8e"
 
-# --- 完整設定 ---
+IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
+
+if IS_LOCAL:
+    PHP_API_URL = "http://127.0.0.1:8000/api"
+else:
+    PHP_API_URL = "http://172.31.24.161/api"
+    
 app.config.update(
     SESSION_PERMANENT=True,
     PERMANENT_SESSION_LIFETIME=timedelta(days=180),
-    SESSION_COOKIE_SECURE=True,   # HTTPS 必備
-    SESSION_COOKIE_HTTPONLY=True, # 防止 XSS 攻擊
-    SESSION_COOKIE_SAMESITE='Lax',# 允許跨分頁保持登入
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_PATH='/',
+    # 根據環境自動切換
+    SESSION_COOKIE_SECURE = not IS_LOCAL, 
+    SESSION_COOKIE_SAMESITE = 'None' if IS_LOCAL else 'Lax',
 )
-# 2. 放在這裡！(在配置之後，路由之前)
-@app.before_request
-def make_session_permanent():
-    session.permanent = True  # 這行會強制讓每次產生的 session 都帶有上面的 180 天期限
-# Update this to your PHP API endpoint
-#PHP_API_URL = "http://127.0.0.1:8000/api"
-PHP_API_URL = "http://172.31.24.161/api"
+
 def render_page(template_body, **kwargs):
     html_layout = f"""
     <!DOCTYPE html>
@@ -187,8 +189,8 @@ function updatePassword() {
     .then(async res => {
         const data = await res.json();
         if (res.ok) {
-            alert("Password updated successfully!");
-            location.reload();
+           alert("Password updated! Please login again with your new password.");
+            window.location.href = '/login'; // 修改成功後導向登入頁
         } else {
             alert("Error: " + (data.message || "Failed to update"));
         }
@@ -292,38 +294,83 @@ def index():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # --- 新增：攔截邏輯 ---
+    # 如果已經有 token 了，代表已經登入，直接跳轉到 dashboard
+    
+    if 'token' in session and 'acc' in session:
+        return redirect(url_for('dashboard'))
+    # --------------------
+
     if request.method == 'POST':
         acc, pw = request.form.get('account'), request.form.get('password')
         try:
             res = requests.post(f"{PHP_API_URL}/login", json={"account": acc, "password": pw}, timeout=5)
             if res.status_code == 200:
                 data = res.json()
-                 # --- 新增這行：開啟永久登入紀錄 ---
+                
+                # 1. 開啟永久登入紀錄 (180天)
                 session.permanent = True
-                session['token'], session['name'] = data['token'], data['user']['name']
+                
+                # 2. 存入 Token 與 使用者名稱
+                session['token'] = data['token']
+                session['name'] = data['user']['name']
+                
+                # 3. 將帳密存入加密的 session，供 dashboard 自動重登使用
+                session['acc'] = acc
+                session['pw'] = pw
+                
                 return redirect(url_for('dashboard'))
+            
             return render_page(LOGIN_CONTENT, error="Login Failed")
-        except: return render_page(LOGIN_CONTENT, error="Connection Error")
+        except Exception as e:
+            print(f"Login Error: {e}")
+            return render_page(LOGIN_CONTENT, error="Connection Error")
+            
     return render_page(LOGIN_CONTENT, error=None)
+
 
 @app.route('/dashboard')
 def dashboard():
-    # 1. 檢查 Flask Session 是否還留著 Token
-    if 'token' not in session: 
+    # 1. 檢查 Flask Session 是否有基本登入資訊
+    if 'token' not in session or 'acc' not in session or 'pw' not in session: 
         return redirect(url_for('login'))
     
-    # 2. 強制續存：每次進入 Dashboard 都確保 Cookie 期限往後延 180 天
+    # 2. 強制續存：確保 Cookie 期限持續往後延
     session.permanent = True
     
     headers = {"Authorization": f"Bearer {session['token']}"}
     
     try:
+        # 第一次嘗試抓資料
         res = requests.get(f"{PHP_API_URL}/my-orders", headers=headers, timeout=5)
-
+        
+        # 3. 如果 Token 無效 (401)，啟動自動重登機制
+        if res.status_code == 401:
+            print("Token expired, attempting auto-relogin...")
+            # 拿 session 裡的帳密去換新 Token
+            re_login = requests.post(f"{PHP_API_URL}/login", 
+                                     json={"account": session['acc'], "password": session['pw']}, 
+                                     timeout=5)
+            
+            if re_login.status_code == 200:
+                data = re_login.json()
+                # 更新 Session 裡的 Token
+                session['token'] = data['token']
+                print("Auto-relogin successful!")
+                
+                # 用新的 Token 再抓一次資料
+                headers = {"Authorization": f"Bearer {session['token']}"}
+                res = requests.get(f"{PHP_API_URL}/my-orders", headers=headers, timeout=5)
+            else:
+                # 如果連帳密都失效了，才真的清空踢人
+                print("Auto-relogin failed, redirecting to login.")
+                session.clear()
+                return redirect(url_for('login'))
             
         orders = res.json().get('orders', [])
+        
     except Exception as e:
-        print(f"Dashboard Error: {e}") # 這裡可以在終端機看到錯誤原因
+        print(f"Dashboard Error: {e}")
         orders = []
         
     return render_page(DASHBOARD_CONTENT, orders=orders)
@@ -332,11 +379,19 @@ def dashboard():
 @app.route('/update_password', methods=['POST'])
 def update_password():
     if 'token' not in session: return {"message": "Unauthorized"}, 401
-    headers = {"Authorization": f"Bearer {session['token']}"}
+    
     pw_data = request.json
+    new_password = pw_data.get('password') # 取得新密碼
+    
+    headers = {"Authorization": f"Bearer {session['token']}"}
     try:
-        # 轉發給 PHP 端 API (請確認 PHP 端已有對應的 /update-password)
         res = requests.post(f"{PHP_API_URL}/update-password", json=pw_data, headers=headers, timeout=5)
+        
+        if res.status_code == 200:
+            # 修改成功，直接清空 Session，強迫使用者重新登入
+            session.clear() 
+            return {"message": "Success. Please login again with your new password."}, 200
+            
         return res.json(), res.status_code
     except:
         return {"message": "Connection Error"}, 500
