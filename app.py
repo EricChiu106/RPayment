@@ -344,48 +344,41 @@ def login():
 
 @app.route('/dashboard')
 def dashboard():
-    # 1. 檢查 Flask Session 是否有基本登入資訊
-    if 'token' not in session or 'acc' not in session or 'pw' not in session: 
+    # 只要 session 裡還有帳密，我們就不把他當作「未登入」
+    if 'acc' not in session or 'pw' not in session:
         return redirect(url_for('login'))
     
-    # 2. 強制續存：確保 Cookie 期限持續往後延
     session.permanent = True
     
-    headers = {"Authorization": f"Bearer {session['token']}"}
-    
+    # 建立一個統一的救援函式，減少重複代碼
+    def get_data(token):
+        headers = {"Authorization": f"Bearer {token}"}
+        return requests.get(f"{PHP_API_URL}/my-orders", headers=headers, timeout=5)
+
     try:
-        # 第一次嘗試抓資料
-        res = requests.get(f"{PHP_API_URL}/my-orders", headers=headers, timeout=5)
+        # 如果連 token 都沒了，直接啟動救援
+        if 'token' not in session:
+            raise Exception("No Token")
+
+        res = get_data(session['token'])
         
-        # 3. 如果 Token 無效 (401)，啟動自動重登機制
+        # 如果 Token 過期 (401)，啟動救援
         if res.status_code == 401:
-            print("Token expired, attempting auto-relogin...")
-            # 拿 session 裡的帳密去換新 Token
+            print("Token expired in Dashboard, rescuing...")
             re_login = requests.post(f"{PHP_API_URL}/login", 
-                                     json={"account": session['acc'], "password": session['pw']}, 
-                                     timeout=5)
-            
+                                   json={"account": session['acc'], "password": session['pw']}, timeout=5)
             if re_login.status_code == 200:
-                data = re_login.json()
-                # 更新 Session 裡的 Token
-                session['token'] = data['token']
-                print("Auto-relogin successful!")
-                
-                # 用新的 Token 再抓一次資料
-                headers = {"Authorization": f"Bearer {session['token']}"}
-                res = requests.get(f"{PHP_API_URL}/my-orders", headers=headers, timeout=5)
+                session['token'] = re_login.json()['token']
+                res = get_data(session['token'])
             else:
-                # 如果連帳密都失效了，才真的清空踢人
-                print("Auto-relogin failed, redirecting to login.")
-                session.clear()
+                # 連帳密都錯了才去登入頁，但「絕對不清除 session」，保留使用者輸入的帳密
                 return redirect(url_for('login'))
-            
+
         orders = res.json().get('orders', [])
-        
     except Exception as e:
-        print(f"Dashboard Error: {e}")
-        orders = []
-        
+        print(f"Dashboard Soft Error: {e}")
+        orders = [] # 發生錯誤時顯示空列表，不要把人踢走
+
     return render_page(DASHBOARD_CONTENT, orders=orders)
 
 
@@ -412,14 +405,24 @@ def update_password():
         
 @app.route('/get_barcode/<payment_id>')
 def get_barcode(payment_id):
-    if 'token' not in session or 'acc' not in session or 'pw' not in session: 
+    if 'acc' not in session or 'pw' not in session:
         return redirect(url_for('login'))
         
-    headers = {"Authorization": f"Bearer {session['token']}"}
     try:
+        # 確保有 Token 才做事
+        if 'token' not in session:
+            # 這裡不跳轉，直接在後台補登
+            re_login = requests.post(f"{PHP_API_URL}/login", 
+                                   json={"account": session['acc'], "password": session['pw']}, timeout=5)
+            if re_login.status_code == 200:
+                session['token'] = re_login.json()['token']
+            else:
+                return redirect(url_for('login'))
+
+        headers = {"Authorization": f"Bearer {session['token']}"}
         res = requests.post(f"{PHP_API_URL}/get-payment-url", json={"payment_id": payment_id}, headers=headers, timeout=5)
-        
-        # --- 自動救援邏輯 ---
+
+        # Token 救援邏輯
         if res.status_code == 401:
             re_login = requests.post(f"{PHP_API_URL}/login", json={"account": session['acc'], "password": session['pw']}, timeout=5)
             if re_login.status_code == 200:
@@ -427,8 +430,9 @@ def get_barcode(payment_id):
                 headers = {"Authorization": f"Bearer {session['token']}"}
                 res = requests.post(f"{PHP_API_URL}/get-payment-url", json={"payment_id": payment_id}, headers=headers, timeout=5)
             else:
-                session.clear()
                 return redirect(url_for('login'))
+
+        # ... 後續處理 barcode 邏輯不變 ...
         # ------------------
 
         data = res.json()
