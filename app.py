@@ -1,12 +1,25 @@
 from flask import Flask, render_template_string, request, redirect, url_for, session
 import requests
+from datetime import timedelta  # 確保有引入這行
 
 app = Flask(__name__)
-app.secret_key = "secure_payment_secret_999"
+app.secret_key = "d2a89f3c71e54b8d9c2e1a6b0f4d8e9a2c3b5f7a9d1c0b8e"
 
+# --- 完整設定 ---
+app.config.update(
+    SESSION_PERMANENT=True,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=180),
+    SESSION_COOKIE_SECURE=True,   # HTTPS 必備
+    SESSION_COOKIE_HTTPONLY=True, # 防止 XSS 攻擊
+    SESSION_COOKIE_SAMESITE='Lax',# 允許跨分頁保持登入
+)
+# 2. 放在這裡！(在配置之後，路由之前)
+@app.before_request
+def make_session_permanent():
+    session.permanent = True  # 這行會強制讓每次產生的 session 都帶有上面的 180 天期限
 # Update this to your PHP API endpoint
-PHP_API_URL = "http://127.0.0.1:8000/api"
-
+#PHP_API_URL = "http://127.0.0.1:8000/api"
+PHP_API_URL = "http://172.31.24.161:8000/api"
 def render_page(template_body, **kwargs):
     html_layout = f"""
     <!DOCTYPE html>
@@ -65,58 +78,52 @@ DASHBOARD_CONTENT = """
             </div>
 
             <div class="fw-bold mb-2 text-primary small"><i class="fas fa-list-ol me-1"></i> Payment Schedule</div>
-            <div class="table-responsive">
-                <table class="table table-sm align-middle">
-                    <thead class="bg-light">
-                        <tr class="small text-muted">
-                            <th class="ps-2">Due Date</th>
-                            <th>Amount</th>
-                            <th class="text-center">Paid Date</th> 
-                            <th class="text-end pe-2">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% set flag = namespace(can_pay=true) %}
-                        {% for s in order.payment_schedule %}
-                        <tr class="border-bottom-dashed">
-                            <td class="py-2 small text-muted">{{ s.date[:10] if s.date else '-' }}</td>
-                            <td class="py-2 fw-bold">${{ "{:,.0f}".format(s.amount | float) }}</td>
-                            
-                            <td class="py-2 small text-center">
-                                {% if s.status == 'Paid' or s.status == '已支付' %}
-                                    <span class="text-success fw-bold">
-                                        {{ s.actual_remittance_date[:10] if s.actual_remittance_date else 'Success' }}
-                                    </span>
-                                {% else %}
-                                    <span class="text-muted" style="opacity: 0.5;">-</span>
-                                {% endif %}
-                            </td>
+           <div class="table-responsive">
+    <table class="table table-sm align-middle">
+        <thead class="bg-light">
+            <tr class="small text-muted">
+                <th class="ps-2">Due Date</th>
+                <th>Amount</th>
+                <th class="text-end pe-2">Action / Status</th>
+            </tr>
+        </thead>
+<tbody>
+            {% set flag = namespace(can_pay=true) %}
+            {% for s in order.payment_schedule %}
+            <tr class="border-bottom-dashed">
+                <td class="py-2 small text-muted text-nowrap">
+                    {{ s.date[:10] if s.date else '-' }}
+                </td>
+                
+                <td class="py-2 fw-bold text-nowrap">
+                    ${{ "{:,.0f}".format(s.amount | float) }}
+                </td>
 
-                            <td class="py-2 text-end pe-2">
-                                {% if s.status == 'Paid' or s.status == '已支付' %}
-                                    <span class="text-success small fw-bold"><i class="fas fa-check-circle"></i> Paid</span>
-                                {% else %}
-                                    {% if flag.can_pay %}
-                                        {% if s.has_barcode or s.barcode_1 %}
-                                            <a href="/get_barcode/{{ s.id }}" 
-                                               class="btn btn-sm btn-success btn-action shadow-sm">
-                                               <i class="fas fa-eye me-1"></i>View Barcode
-                                            </a>
-                                        {% else %}
-                                            <a href="/get_barcode/{{ s.id }}" 
-                                               class="btn btn-sm btn-primary btn-action shadow-sm">
-                                               <i class="fas fa-magic me-1"></i>Get Barcode
-                                            </a>
-                                        {% endif %}
-                                        {% set flag.can_pay = false %}
-                                    {% else %}
-                                        <span class="badge bg-light text-muted border" style="font-size: 0.7rem;">Pending</span>
-                                    {% endif %}
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
+                <td class="py-2 text-end pe-2">
+                    {% if s.status == 'Paid' or s.status == '已支付' %}
+                        <div class="text-success fw-bold" style="font-size: 0.75rem;">
+                            <i class="fas fa-check-circle"></i> Paid
+                        </div>
+                        <div class="text-success" style="font-size: 0.65rem; margin-top: -2px;">
+                            {{ s.actual_remittance_date[:10] if s.actual_remittance_date else '' }}
+                        </div>
+                    {% else %}
+                        {% if flag.can_pay %}
+                            <a href="/get_barcode/{{ s.id }}" 
+                               class="btn btn-sm {% if s.has_barcode or s.barcode_1 %}btn-success{% else %}btn-primary{% endif %} shadow-sm fw-bold"
+                               style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;">
+                               <i class="fas {% if s.has_barcode or s.barcode_1 %}fa-eye{% else %}fa-magic{% endif %} me-1"></i>
+                               {{ 'View Barcode' if (s.has_barcode or s.barcode_1) else 'Get Barcode' }}
+                            </a>
+                            {% set flag.can_pay = false %}
+                        {% else %}
+                            <span class="badge bg-light text-muted border fw-normal" style="font-size: 0.7rem; padding: 4px 8px;">Pending</span>
+                        {% endif %}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
                 </table>
             </div>
 
@@ -137,8 +144,15 @@ DASHBOARD_CONTENT = """
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <p class="small text-muted mb-3">Please enter your new login password.</p>
-                <input type="password" id="new_pw" class="form-control py-2" style="border-radius: 10px;" placeholder="Min 6 characters">
+                <p class="small text-muted mb-3">Please enter and confirm your new password.</p>
+                <div class="mb-3">
+                    <label class="small fw-bold text-muted">New Password</label>
+                    <input type="password" id="new_pw" class="form-control py-2" style="border-radius: 10px;" placeholder="Min 6 characters">
+                </div>
+                <div class="mb-3">
+                    <label class="small fw-bold text-muted">Confirm Password</label>
+                    <input type="password" id="confirm_pw" class="form-control py-2" style="border-radius: 10px;" placeholder="Type again to confirm">
+                </div>
             </div>
             <div class="modal-footer border-0">
                 <button type="button" class="btn btn-primary w-100 py-2 fw-bold" style="border-radius: 10px;" onclick="updatePassword()">Save New Password</button>
@@ -150,12 +164,21 @@ DASHBOARD_CONTENT = """
 <script>
 function updatePassword() {
     const pw = document.getElementById('new_pw').value;
+    const confirmPw = document.getElementById('confirm_pw').value; // 取得確認密碼
+
+    // 1. 檢查長度
     if (pw.length < 6) {
         alert("Password must be at least 6 characters");
         return;
     }
     
-    // 呼叫 Python 後端
+    // 2. 檢查兩次輸入是否相同
+    if (pw !== confirmPw) {
+        alert("Passwords do not match! Please check again.");
+        return;
+    }
+    
+    // 3. 呼叫 Python 後端
     fetch('/update_password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -176,6 +199,12 @@ function updatePassword() {
 """
 
 BARCODE_PAGE = """
+<style>
+    svg {
+        max-width: 100%; /* 防止條碼超出螢幕 */
+        height: auto;
+    }
+</style>
 <div class="text-center mb-4">
     <h4 class="fw-bold">Convenience Store Barcode</h4>
     <p class="text-danger small fw-bold">
@@ -221,11 +250,13 @@ BARCODE_PAGE = """
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script>
     const options = {
-        format: "CODE128",
-        width: 2,
-        height: 50,
+        format: "CODE39",
+        width: 1,
+        height: 60,
         displayValue: false,
-        margin: 10
+        margin: 10,
+        background: "#ffffff",
+        lineColor: "#000000"
     };
     JsBarcode("#barcode1", "{{ b.barcode_1 }}", options);
     JsBarcode("#barcode2", "{{ b.barcode_2 }}", options);
@@ -267,6 +298,8 @@ def login():
             res = requests.post(f"{PHP_API_URL}/login", json={"account": acc, "password": pw}, timeout=5)
             if res.status_code == 200:
                 data = res.json()
+                 # --- 新增這行：開啟永久登入紀錄 ---
+                session.permanent = True
                 session['token'], session['name'] = data['token'], data['user']['name']
                 return redirect(url_for('dashboard'))
             return render_page(LOGIN_CONTENT, error="Login Failed")
@@ -275,12 +308,28 @@ def login():
 
 @app.route('/dashboard')
 def dashboard():
-    if 'token' not in session: return redirect(url_for('login'))
+    # 1. 檢查 Flask Session 是否還留著 Token
+    if 'token' not in session: 
+        return redirect(url_for('login'))
+    
+    # 2. 強制續存：每次進入 Dashboard 都確保 Cookie 期限往後延 180 天
+    session.permanent = True
+    
     headers = {"Authorization": f"Bearer {session['token']}"}
+    
     try:
         res = requests.get(f"{PHP_API_URL}/my-orders", headers=headers, timeout=5)
+        
+        # 3. 如果內網 Laravel 說 Token 無效 (例如 Laravel 重啟或 Session 過期)
+        if res.status_code == 401:
+            session.clear() # 清除本地過期的 token
+            return redirect(url_for('login'))
+            
         orders = res.json().get('orders', [])
-    except: orders = []
+    except Exception as e:
+        print(f"Dashboard Error: {e}") # 這裡可以在終端機看到錯誤原因
+        orders = []
+        
     return render_page(DASHBOARD_CONTENT, orders=orders)
 
 
