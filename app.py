@@ -17,6 +17,7 @@ else:
 app.config.update(
     SESSION_PERMANENT=True,
     PERMANENT_SESSION_LIFETIME=timedelta(days=180),
+    SESSION_REFRESH_EACH_REQUEST=True,  # 新增這行：確保每次操作都刷新 180 天期限
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_PATH='/',
     # 根據環境自動切換
@@ -280,23 +281,57 @@ BARCODE_PAGE = """
 LOGIN_CONTENT = """
 <div class="row justify-content-center mt-5">
     <div class="col-md-5 col-12">
-        <div class="card p-4">
-            <h3 class="text-center mb-4">Member Login</h3>
-            {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
-            <form method="POST" action="/login">
+        <div class="card p-4 shadow-sm" style="border-radius: 20px;">
+            <h3 class="text-center mb-4 fw-bold">Member Login</h3>
+            {% if error %}<div class="alert alert-danger py-2 small">{{ error }}</div>{% endif %}
+            
+            <form method="POST" action="/login" id="loginForm">
                 <div class="mb-3">
-                    <label class="form-label">Account</label>
-                    <input type="text" name="account" class="form-control" placeholder="Enter account" required>
+                    <label class="form-label small fw-bold text-muted">Account</label>
+                    <input type="text" id="login_account" name="account" class="form-control py-2" 
+                           style="border-radius: 10px;" placeholder="Enter your account" required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Password</label>
-                    <input type="password" name="password" class="form-control" placeholder="Enter password" required>
+                    <label class="form-label small fw-bold text-muted">Password</label>
+                    <input type="password" name="password" class="form-control py-2" 
+                           style="border-radius: 10px;" placeholder="Enter your password" required>
                 </div>
-                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold">Login</button>
+                
+                <div class="mb-4 form-check">
+                    <input type="checkbox" class="form-check-input" id="rememberMe" checked>
+                    <label class="form-check-label small text-muted" for="rememberMe">Remember Account</label>
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold shadow-sm" 
+                        style="border-radius: 10px;">Login</button>
             </form>
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const loginAccountInput = document.getElementById('login_account');
+    const rememberMeCheckbox = document.getElementById('rememberMe');
+    const loginForm = document.getElementById('loginForm');
+
+    // 1. 頁面載入時：檢查是否有存過的帳號
+    const savedAccount = localStorage.getItem('member_account');
+    if (savedAccount) {
+        loginAccountInput.value = savedAccount;
+        rememberMeCheckbox.checked = true;
+    }
+
+    // 2. 表單提交時：根據勾選狀態決定要存還是刪
+    loginForm.addEventListener('submit', function() {
+        if (rememberMeCheckbox.checked) {
+            localStorage.setItem('member_account', loginAccountInput.value);
+        } else {
+            localStorage.removeItem('member_account');
+        }
+    });
+});
+</script>
 """
 
 @app.route('/')
@@ -348,8 +383,7 @@ def dashboard():
     if 'acc' not in session or 'pw' not in session:
         return redirect(url_for('login'))
     
-    session.permanent = True
-    
+    session.permanent = True   
     # 建立一個統一的救援函式，減少重複代碼
     def get_data(token):
         headers = {"Authorization": f"Bearer {token}"}
