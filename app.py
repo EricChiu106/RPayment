@@ -4,11 +4,24 @@ import requests
 from datetime import timedelta
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_session import Session # 伺服器端執行: pip install flask-session
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
+
+
+
 # 讓 Flask 正確識別 HTTPS 代理，解決手機 Safari Cookie 信任問題
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.secret_key = "d2a89f3c71e54b8d9c2e1a6b0f4d8e9a2c3b5f7a9d1c0b8e"
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
+
 
 IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
 
@@ -306,8 +319,15 @@ def index():
     if session.get('acc') and session.get('token'):
         return redirect(url_for('dashboard'))
     return redirect(url_for('login'))
-
+    
+    
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return render_page(LOGIN_CONTENT, error="Too many attempts. Please wait 1 minute and try again.")
+    
+    
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("6 per minute", exempt_when=lambda: request.method == 'GET')
 def login():
     if session.get('acc') and session.get('token'):
         return redirect(url_for('dashboard'))
