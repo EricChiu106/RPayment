@@ -19,7 +19,7 @@ def make_session_permanent():
     session.permanent = True  # 這行會強制讓每次產生的 session 都帶有上面的 180 天期限
 # Update this to your PHP API endpoint
 #PHP_API_URL = "http://127.0.0.1:8000/api"
-PHP_API_URL = "http://172.31.24.161:8000/api"
+PHP_API_URL = "http://172.31.24.161/api"
 def render_page(template_body, **kwargs):
     html_layout = f"""
     <!DOCTYPE html>
@@ -319,11 +319,7 @@ def dashboard():
     
     try:
         res = requests.get(f"{PHP_API_URL}/my-orders", headers=headers, timeout=5)
-        
-        # 3. 如果內網 Laravel 說 Token 無效 (例如 Laravel 重啟或 Session 過期)
-        if res.status_code == 401:
-            session.clear() # 清除本地過期的 token
-            return redirect(url_for('login'))
+
             
         orders = res.json().get('orders', [])
     except Exception as e:
