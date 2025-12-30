@@ -19,7 +19,7 @@ app.config.update(
     SESSION_COOKIE_PATH='/',
     # 根據環境自動切換
     SESSION_COOKIE_SECURE = not IS_LOCAL, 
-    SESSION_COOKIE_SAMESITE = 'None' if IS_LOCAL else 'Lax',
+    SESSION_COOKIE_SAMESITE = 'Lax',
 )
 
 def render_page(template_body, **kwargs):
@@ -290,6 +290,8 @@ LOGIN_CONTENT = """
 
 @app.route('/')
 def index():
+    if 'token' in session and 'acc' in session:
+        return redirect(url_for('dashboard'))
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
