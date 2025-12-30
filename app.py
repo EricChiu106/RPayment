@@ -57,7 +57,7 @@ def render_page(template_body, **kwargs):
 
 DASHBOARD_CONTENT = """
 <div class="container py-2">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="fw-bold m-0">Hi, {{ session.get('name', 'Member') }}</h4>
         <div>
             <button class="btn btn-sm btn-outline-primary me-2 shadow-sm" data-bs-toggle="modal" data-bs-target="#pwModal" title="Change Password">
@@ -67,74 +67,87 @@ DASHBOARD_CONTENT = """
         </div>
     </div>
 
+    <div class="alert shadow-sm border-0 mb-4" style="background-color: #fffdf0; border-left: 4px solid #ffc107; border-radius: 12px;">
+        <div class="d-flex align-items-center">
+            <i class="fas fa-clock text-warning me-2"></i>
+            <div class="small text-muted">
+                <b>Payment Notice:</b> Verification takes <b>5-7 working days</b> after payment. Your status will update automatically.
+            </div>
+        </div>
+    </div>
+
     {% for order in orders %}
-    <div class="card mb-4">
+    <div class="card mb-4 shadow-sm" style="border-radius: 15px;">
         <div class="card-body">
-            <div class="d-flex justify-content-between mb-3">
-                <h6 class="fw-bold">No: {{ order.order_no }}</h6>
-                <span class="badge {% if order.status == 'Finished' or order.status == '已結清' %}bg-success{% else %}bg-warning text-dark{% endif %} rounded-pill">
+            <div class="d-flex justify-content-between mb-3 align-items-center">
+                <h6 class="fw-bold m-0 text-secondary">Order: {{ order.order_no }}</h6>
+                <span class="badge {% if order.status == 'Finished' or order.status == '已結清' %}bg-success{% else %}bg-warning text-dark{% endif %} rounded-pill shadow-sm">
                     {{ 'Finished' if (order.status == '已結清' or order.status == 'Finished') else 'Pending' }}
                 </span>
             </div>
 
             <div class="p-2 bg-light rounded mb-3">
-                <small class="text-muted d-block">Items:</small>
+                <small class="text-muted d-block" style="font-size: 0.7rem;">Items:</small>
                 <div class="fw-bold small">{{ order.items_text }}</div>
             </div>
 
             <div class="fw-bold mb-2 text-primary small"><i class="fas fa-list-ol me-1"></i> Payment Schedule</div>
-           <div class="table-responsive">
-    <table class="table table-sm align-middle">
-        <thead class="bg-light">
-            <tr class="small text-muted">
-                <th class="ps-2">Due Date</th>
-                <th>Amount</th>
-                <th class="text-end pe-2">Action / Status</th>
-            </tr>
-        </thead>
-<tbody>
-            {% set flag = namespace(can_pay=true) %}
-            {% for s in order.payment_schedule %}
-            <tr class="border-bottom-dashed">
-                <td class="py-2 small text-muted text-nowrap">
-                    {{ s.date[:10] if s.date else '-' }}
-                </td>
-                
-                <td class="py-2 fw-bold text-nowrap">
-                    ${{ "{:,.0f}".format(s.amount | float) }}
-                </td>
+            
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead class="bg-light">
+                        <tr class="small text-muted" style="font-size: 0.7rem;">
+                            <th class="ps-2">Due Date</th>
+                            <th>Amount</th>
+                            <th class="text-end pe-2">Action / Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set flag = namespace(can_pay=true) %}
+                        {% for s in order.payment_schedule %}
+                        <tr class="border-bottom-dashed">
+                            <td class="py-2 small text-muted text-nowrap">
+                                {{ s.date[:10] if s.date else '-' }}
+                            </td>
+                            
+                            <td class="py-2 fw-bold text-nowrap">
+                                ${{ "{:,.0f}".format(s.amount | float) }}
+                            </td>
 
-                <td class="py-2 text-end pe-2">
-                    {% if s.status == 'Paid' or s.status == '已支付' %}
-                        <div class="text-success fw-bold" style="font-size: 0.75rem;">
-                            <i class="fas fa-check-circle"></i> Paid
-                        </div>
-                        <div class="text-success" style="font-size: 0.65rem; margin-top: -2px;">
-                            {{ s.actual_remittance_date[:10] if s.actual_remittance_date else '' }}
-                        </div>
-                    {% else %}
-                        {% if flag.can_pay %}
-                            <a href="/get_barcode/{{ s.id }}" 
-                               class="btn btn-sm {% if s.has_barcode or s.barcode_1 %}btn-success{% else %}btn-primary{% endif %} shadow-sm fw-bold"
-                               style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;">
-                               <i class="fas {% if s.has_barcode or s.barcode_1 %}fa-eye{% else %}fa-magic{% endif %} me-1"></i>
-                               {{ 'View Barcode' if (s.has_barcode or s.barcode_1) else 'Get Barcode' }}
-                            </a>
-                            {% set flag.can_pay = false %}
-                        {% else %}
-                            <span class="badge bg-light text-muted border fw-normal" style="font-size: 0.7rem; padding: 4px 8px;">Pending</span>
-                        {% endif %}
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
+                            <td class="py-2 text-end pe-2">
+                                {% if s.status == 'Paid' or s.status == '已支付' %}
+                                    <div class="text-success fw-bold" style="font-size: 0.75rem;">
+                                        <i class="fas fa-check-circle"></i> Paid
+                                    </div>
+                                    <div class="text-success" style="font-size: 0.65rem; margin-top: -2px;">
+                                        {{ s.actual_remittance_date[:10] if s.actual_remittance_date else '' }}
+                                    </div>
+                                {% else %}
+                                    {% if flag.can_pay %}
+                                        <a href="/get_barcode/{{ s.id }}" 
+                                           class="btn btn-sm {% if s.has_barcode or s.barcode_1 %}btn-success{% else %}btn-primary{% endif %} shadow-sm fw-bold"
+                                           style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;">
+                                           <i class="fas {% if s.has_barcode or s.barcode_1 %}fa-eye{% else %}fa-magic{% endif %} me-1"></i>
+                                           {{ 'View Barcode' if (s.has_barcode or s.barcode_1) else 'Get Barcode' }}
+                                        </a>
+                                        {% set flag.can_pay = false %}
+                                    {% else %}
+                                        <div class="text-end">
+                                            <span class="badge bg-light text-muted border fw-normal" style="font-size: 0.65rem; padding: 4px 8px;">Pending</span>
+                                            <div class="text-muted" style="font-size: 0.55rem; margin-top: 2px; letter-spacing: -0.2px;">Wait 5-7 days for sync</div>
+                                        </div>
+                                    {% endif %}
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
                 </table>
             </div>
 
             <div class="mt-3 pt-2 border-top d-flex justify-content-between align-items-center">
                 <small class="text-muted">Balance: <span class="text-danger fw-bold">${{ "{:,.0f}".format(order.balance) }}</span></small>
-                <small class="text-muted">Installments: {{ order.period }}</small>
+                <small class="text-muted" style="font-size: 0.7rem;">Term: {{ order.period }}</small>
             </div>
         </div>
     </div>
@@ -145,22 +158,22 @@ DASHBOARD_CONTENT = """
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content shadow" style="border-radius: 20px; border: none;">
             <div class="modal-header border-0 pb-0">
-                <h5 class="modal-title fw-bold">Update Password</h5>
+                <h5 class="modal-header-title fw-bold">Update Password</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <p class="small text-muted mb-3">Please enter and confirm your new password.</p>
                 <div class="mb-3">
                     <label class="small fw-bold text-muted">New Password</label>
-                    <input type="password" id="new_pw" class="form-control py-2" style="border-radius: 10px;" placeholder="Min 6 characters">
+                    <input type="password" id="new_pw" class="form-control py-2 shadow-sm" style="border-radius: 10px;" placeholder="Min 6 characters">
                 </div>
                 <div class="mb-3">
                     <label class="small fw-bold text-muted">Confirm Password</label>
-                    <input type="password" id="confirm_pw" class="form-control py-2" style="border-radius: 10px;" placeholder="Type again to confirm">
+                    <input type="password" id="confirm_pw" class="form-control py-2 shadow-sm" style="border-radius: 10px;" placeholder="Type again to confirm">
                 </div>
             </div>
             <div class="modal-footer border-0">
-                <button type="button" class="btn btn-primary w-100 py-2 fw-bold" style="border-radius: 10px;" onclick="updatePassword()">Save New Password</button>
+                <button type="button" class="btn btn-primary w-100 py-2 fw-bold shadow-sm" style="border-radius: 10px;" onclick="updatePassword()">Save New Password</button>
             </div>
         </div>
     </div>
@@ -169,21 +182,17 @@ DASHBOARD_CONTENT = """
 <script>
 function updatePassword() {
     const pw = document.getElementById('new_pw').value;
-    const confirmPw = document.getElementById('confirm_pw').value; // 取得確認密碼
+    const confirmPw = document.getElementById('confirm_pw').value;
 
-    // 1. 檢查長度
     if (pw.length < 6) {
         alert("Password must be at least 6 characters");
         return;
     }
-    
-    // 2. 檢查兩次輸入是否相同
     if (pw !== confirmPw) {
-        alert("Passwords do not match! Please check again.");
+        alert("Passwords do not match!");
         return;
     }
-    
-    // 3. 呼叫 Python 後端
+
     fetch('/update_password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -192,10 +201,10 @@ function updatePassword() {
     .then(async res => {
         const data = await res.json();
         if (res.ok) {
-           alert("Password updated! Please login again with your new password.");
-            window.location.href = '/login'; // 修改成功後導向登入頁
+           alert("Password updated! Please login again.");
+           window.location.href = '/login';
         } else {
-            alert("Error: " + (data.message || "Failed to update"));
+            alert("Error: " + (data.message || "Failed"));
         }
     })
     .catch(err => alert("Connection Error"));
@@ -209,7 +218,13 @@ BARCODE_PAGE = """
         max-width: 100%; /* 防止條碼超出螢幕 */
         height: auto;
     }
+    .notice-box {
+        background-color: #fffdf0;
+        border-left: 5px solid #ffc107;
+        border-radius: 12px;
+    }
 </style>
+
 <div class="text-center mb-4">
     <h4 class="fw-bold">Convenience Store Barcode</h4>
     <p class="text-danger small fw-bold">
@@ -246,8 +261,19 @@ BARCODE_PAGE = """
     </div>
 </div>
 
-<div class="px-2">
-    <button onclick="goBack()" class="btn btn-outline-primary w-100 py-3 fw-bold rounded-3">
+<div class="notice-box p-3 mb-4 shadow-sm">
+    <h6 class="fw-bold text-dark mb-2">
+        <i class="fas fa-info-circle text-warning me-1"></i> Payment Notice
+    </h6>
+    <ul class="small text-muted mb-0 ps-3">
+        <li class="mb-2">After payment, please <b>take a photo of the receipt</b> and send it to our official <b>LINE</b> for faster processing.</li>
+        <li class="mb-2">Verification usually takes <b>5 to 7 working days</b>.</li>
+        <li>The system will <b>automatically update</b> your status once confirmed. Thank you for your patience!</li>
+    </ul>
+</div>
+
+<div class="px-2 mb-5">
+    <button onclick="goBack()" class="btn btn-outline-primary w-100 py-3 fw-bold rounded-3 shadow-sm">
         <i class="fas fa-arrow-left me-2"></i>Back to Order List
     </button>
 </div>
@@ -266,15 +292,14 @@ BARCODE_PAGE = """
     JsBarcode("#barcode1", "{{ b.barcode_1 }}", options);
     JsBarcode("#barcode2", "{{ b.barcode_2 }}", options);
     JsBarcode("#barcode3", "{{ b.barcode_3 }}", options);
+
     function goBack() {
-    // 優先使用瀏覽器紀錄回退，這在手機上最能保持 Session
-    if (document.referrer.includes('dashboard')) {
-        window.history.back();
-    } else {
-        // 如果來源不是 dashboard，才強制跳轉
-        window.location.href = '/dashboard';
+        if (document.referrer.includes('dashboard')) {
+            window.history.back();
+        } else {
+            window.location.href = '/dashboard';
+        }
     }
-}
 </script>
 """
 
