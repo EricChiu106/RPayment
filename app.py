@@ -1,8 +1,10 @@
 from flask import Flask, render_template_string, request, redirect, url_for, session
 import requests
-from datetime import timedelta  # 確保有引入這行
+from datetime import timedelta  
+from werkzeug.middleware.proxy_fix import ProxyFix 
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.secret_key = "d2a89f3c71e54b8d9c2e1a6b0f4d8e9a2c3b5f7a9d1c0b8e"
 
 IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
@@ -244,9 +246,9 @@ BARCODE_PAGE = """
 </div>
 
 <div class="px-2">
-    <a href="/dashboard" class="btn btn-outline-primary w-100 py-3 fw-bold rounded-3">
+    <button onclick="goBack()" class="btn btn-outline-primary w-100 py-3 fw-bold rounded-3">
         <i class="fas fa-arrow-left me-2"></i>Back to Order List
-    </a>
+    </button>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
@@ -263,6 +265,15 @@ BARCODE_PAGE = """
     JsBarcode("#barcode1", "{{ b.barcode_1 }}", options);
     JsBarcode("#barcode2", "{{ b.barcode_2 }}", options);
     JsBarcode("#barcode3", "{{ b.barcode_3 }}", options);
+    function goBack() {
+    // 優先使用瀏覽器紀錄回退，這在手機上最能保持 Session
+    if (document.referrer.includes('dashboard')) {
+        window.history.back();
+    } else {
+        // 如果來源不是 dashboard，才強制跳轉
+        window.location.href = '/dashboard';
+    }
+}
 </script>
 """
 
@@ -401,31 +412,39 @@ def update_password():
         
 @app.route('/get_barcode/<payment_id>')
 def get_barcode(payment_id):
-    if 'token' not in session: return redirect(url_for('login'))
+    if 'token' not in session or 'acc' not in session or 'pw' not in session: 
+        return redirect(url_for('login'))
+        
     headers = {"Authorization": f"Bearer {session['token']}"}
     try:
         res = requests.post(f"{PHP_API_URL}/get-payment-url", json={"payment_id": payment_id}, headers=headers, timeout=5)
-        data = res.json()
         
-        print(f"--- Debug Info ---")
-        print(f"Status: {res.status_code}")
-        print(f"Payload: {res.text}")
+        # --- 自動救援邏輯 ---
+        if res.status_code == 401:
+            re_login = requests.post(f"{PHP_API_URL}/login", json={"account": session['acc'], "password": session['pw']}, timeout=5)
+            if re_login.status_code == 200:
+                session['token'] = re_login.json()['token']
+                headers = {"Authorization": f"Bearer {session['token']}"}
+                res = requests.post(f"{PHP_API_URL}/get-payment-url", json={"payment_id": payment_id}, headers=headers, timeout=5)
+            else:
+                session.clear()
+                return redirect(url_for('login'))
+        # ------------------
 
+        data = res.json()
         if res.status_code == 200 or res.status_code == 400:
             barcode_data = data.get('barcode')
             if barcode_data and barcode_data.get('barcode_3'):
                 try:
-                    # Extract last 5 digits from barcode_3 as amount
                     raw_amount = barcode_data['barcode_3'][-5:]
                     barcode_data['amount'] = int(raw_amount)
                 except:
                     barcode_data['amount'] = 0
-                
                 return render_page(BARCODE_PAGE, b=barcode_data)
 
         return f"Error: {data.get('message', 'Unknown Error')}"
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Barcode Error: {str(e)}")
         return "System Error"
 
 # 請檢查 app.py 裡是否有這一段
