@@ -1,29 +1,43 @@
+import os
 from flask import Flask, render_template_string, request, redirect, url_for, session
 import requests
-from datetime import timedelta  
-from werkzeug.middleware.proxy_fix import ProxyFix 
+from datetime import timedelta
+from werkzeug.middleware.proxy_fix import ProxyFix
+from flask_session import Session # 伺服器端執行: pip install flask-session
 
 app = Flask(__name__)
+# 讓 Flask 正確識別 HTTPS 代理，解決手機 Safari Cookie 信任問題
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.secret_key = "d2a89f3c71e54b8d9c2e1a6b0f4d8e9a2c3b5f7a9d1c0b8e"
 
 IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
 
+# --- 伺服器端 Session 儲存目錄設定 ---
+session_dir = os.path.join(os.getcwd(), 'flask_session')
+if not os.path.exists(session_dir):
+    os.makedirs(session_dir)
+
 if IS_LOCAL:
     PHP_API_URL = "http://127.0.0.1:8000/api"
 else:
     PHP_API_URL = "http://172.31.24.161/api"
-    
+
+# --- Config 設定 (解決 Safari 頻繁登出) ---
 app.config.update(
     SESSION_PERMANENT=True,
     PERMANENT_SESSION_LIFETIME=timedelta(days=180),
-    SESSION_REFRESH_EACH_REQUEST=True,  # 新增這行：確保每次操作都刷新 180 天期限
+    SESSION_REFRESH_EACH_REQUEST=True,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_PATH='/',
-    # 根據環境自動切換
-    SESSION_COOKIE_SECURE = not IS_LOCAL, 
-    SESSION_COOKIE_SAMESITE = 'Lax',
+    SESSION_COOKIE_SECURE=not IS_LOCAL,
+    SESSION_COOKIE_SAMESITE='Lax',
+    
+    # 核心：啟動伺服器端檔案儲存，手機只存 ID
+    SESSION_TYPE='filesystem',
+    SESSION_FILE_DIR=session_dir,
+    SESSION_FILE_THRESHOLD=5000
 )
+Session(app)
 
 def render_page(template_body, **kwargs):
     html_layout = f"""
@@ -42,13 +56,12 @@ def render_page(template_body, **kwargs):
             .barcode-box {{ background: white; padding: 15px; border: 1px dashed #ccc; margin-bottom: 10px; text-align: center; border-radius: 10px; }}
             .barcode-text {{ font-family: 'Courier New', monospace; font-size: 1.3rem; letter-spacing: 2px; font-weight: bold; color: #000; }}
             .btn-action {{ font-size: 0.75rem; padding: 2px 10px; border-radius: 20px; font-weight: bold; }}
-            /* 讓 Modal 看起來更現代 */
             .modal-content {{ border: none; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }}
+            .notice-box {{ background-color: #fffdf0; border-left: 5px solid #ffc107; border-radius: 12px; }}
         </style>
     </head>
     <body>
         <div class="container py-4">{{{{ template_body | safe }}}}</div>
-
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     </body>
     </html>
@@ -109,11 +122,9 @@ DASHBOARD_CONTENT = """
                             <td class="py-2 small text-muted text-nowrap">
                                 {{ s.date[:10] if s.date else '-' }}
                             </td>
-                            
                             <td class="py-2 fw-bold text-nowrap">
                                 ${{ "{:,.0f}".format(s.amount | float) }}
                             </td>
-
                             <td class="py-2 text-end pe-2">
                                 {% if s.status == 'Paid' or s.status == '已支付' %}
                                     <div class="text-success fw-bold" style="font-size: 0.75rem;">
@@ -156,20 +167,19 @@ DASHBOARD_CONTENT = """
 
 <div class="modal fade" id="pwModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content shadow" style="border-radius: 20px; border: none;">
+        <div class="modal-content shadow" style="border-radius: 20px;">
             <div class="modal-header border-0 pb-0">
                 <h5 class="modal-header-title fw-bold">Update Password</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <p class="small text-muted mb-3">Please enter and confirm your new password.</p>
                 <div class="mb-3">
                     <label class="small fw-bold text-muted">New Password</label>
                     <input type="password" id="new_pw" class="form-control py-2 shadow-sm" style="border-radius: 10px;" placeholder="Min 6 characters">
                 </div>
                 <div class="mb-3">
                     <label class="small fw-bold text-muted">Confirm Password</label>
-                    <input type="password" id="confirm_pw" class="form-control py-2 shadow-sm" style="border-radius: 10px;" placeholder="Type again to confirm">
+                    <input type="password" id="confirm_pw" class="form-control py-2 shadow-sm" style="border-radius: 10px;" placeholder="Type again">
                 </div>
             </div>
             <div class="modal-footer border-0">
@@ -178,20 +188,12 @@ DASHBOARD_CONTENT = """
         </div>
     </div>
 </div>
-
 <script>
 function updatePassword() {
     const pw = document.getElementById('new_pw').value;
     const confirmPw = document.getElementById('confirm_pw').value;
-
-    if (pw.length < 6) {
-        alert("Password must be at least 6 characters");
-        return;
-    }
-    if (pw !== confirmPw) {
-        alert("Passwords do not match!");
-        return;
-    }
+    if (pw.length < 6) { alert("Min 6 characters"); return; }
+    if (pw !== confirmPw) { alert("Passwords do not match!"); return; }
 
     fetch('/update_password', {
         method: 'POST',
@@ -199,34 +201,19 @@ function updatePassword() {
         body: JSON.stringify({ password: pw })
     })
     .then(async res => {
-        const data = await res.json();
         if (res.ok) {
            alert("Password updated! Please login again.");
            window.location.href = '/login';
         } else {
-            alert("Error: " + (data.message || "Failed"));
+            alert("Update Failed");
         }
-    })
-    .catch(err => alert("Connection Error"));
+    });
 }
 </script>
 """
 
 BARCODE_PAGE = """
-<style>
-    svg {
-        max-width: 100%; /* 防止條碼超出螢幕 */
-        height: auto;
-    }
-    .notice-box {
-        background-color: #fffdf0;
-        border-left: 5px solid #ffc107;
-        border-radius: 12px;
-    }
-</style>
-
 <div class="text-center mb-4">
-    <h4 class="fw-bold">Convenience Store Barcode</h4>
     <p class="text-danger small fw-bold">
         <i class="fas fa-sun me-1"></i>Please turn your screen brightness to maximum and present this to the clerk.
     </p>
@@ -240,21 +227,9 @@ BARCODE_PAGE = """
 </div>
 
 <div class="card p-3 mb-4 shadow border-0" style="border-radius: 20px;">
-    <div class="text-center mb-4">
-        <svg id="barcode1"></svg>
-        <div class="fw-bold mt-1" style="letter-spacing: 2px; font-family: monospace;">{{ b.barcode_1 }}</div>
-    </div>
-
-    <div class="text-center mb-4">
-        <svg id="barcode2"></svg>
-        <div class="fw-bold mt-1" style="letter-spacing: 2px; font-family: monospace;">{{ b.barcode_2 }}</div>
-    </div>
-
-    <div class="text-center mb-4">
-        <svg id="barcode3"></svg>
-        <div class="fw-bold mt-1" style="letter-spacing: 2px; font-family: monospace;">{{ b.barcode_3 }}</div>
-    </div>
-
+    <div class="text-center mb-4"><svg id="barcode1"></svg><div class="fw-bold small">{{ b.barcode_1 }}</div></div>
+    <div class="text-center mb-4"><svg id="barcode2"></svg><div class="fw-bold small">{{ b.barcode_2 }}</div></div>
+    <div class="text-center mb-4"><svg id="barcode3"></svg><div class="fw-bold small">{{ b.barcode_3 }}</div></div>
     <div class="mt-2 text-center border-top pt-3">
         <div class="text-danger fw-bold small">Payment Deadline</div>
         <div class="fs-5 fw-bold text-dark">{{ b.expired_at }}</div>
@@ -262,13 +237,11 @@ BARCODE_PAGE = """
 </div>
 
 <div class="notice-box p-3 mb-4 shadow-sm">
-    <h6 class="fw-bold text-dark mb-2">
-        <i class="fas fa-info-circle text-warning me-1"></i> Payment Notice
-    </h6>
+    <h6 class="fw-bold text-dark mb-2"><i class="fas fa-info-circle text-warning me-1"></i> Payment Notice</h6>
     <ul class="small text-muted mb-0 ps-3">
-        <li class="mb-2">After payment, please <b>take a photo of the receipt</b> and send it to our official <b>LINE</b> for faster processing.</li>
-        <li class="mb-2">Verification usually takes <b>5 to 7 working days</b>.</li>
-        <li>The system will <b>automatically update</b> your status once confirmed. Thank you for your patience!</li>
+        <li class="mb-2">After payment, please <b>take a photo of the receipt</b> and send to our <b>LINE</b>.</li>
+        <li class="mb-2">Verification takes <b>5 to 7 working days</b>.</li>
+        <li>Status will <b>automatically update</b>. Thank you!</li>
     </ul>
 </div>
 
@@ -280,25 +253,13 @@ BARCODE_PAGE = """
 
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script>
-    const options = {
-        format: "CODE39",
-        width: 1,
-        height: 60,
-        displayValue: false,
-        margin: 10,
-        background: "#ffffff",
-        lineColor: "#000000"
-    };
-    JsBarcode("#barcode1", "{{ b.barcode_1 }}", options);
-    JsBarcode("#barcode2", "{{ b.barcode_2 }}", options);
-    JsBarcode("#barcode3", "{{ b.barcode_3 }}", options);
-
-    function goBack() {
-        if (document.referrer.includes('dashboard')) {
-            window.history.back();
-        } else {
-            window.location.href = '/dashboard';
-        }
+    const opt = { format: "CODE39", width: 1, height: 60, displayValue: false, margin: 10 };
+    JsBarcode("#barcode1", "{{ b.barcode_1 }}", opt);
+    JsBarcode("#barcode2", "{{ b.barcode_2 }}", opt);
+    JsBarcode("#barcode3", "{{ b.barcode_3 }}", opt);
+    function goBack() { 
+        if (document.referrer.includes('dashboard')) window.history.back();
+        else window.location.href = '/dashboard';
     }
 </script>
 """
@@ -309,51 +270,32 @@ LOGIN_CONTENT = """
         <div class="card p-4 shadow-sm" style="border-radius: 20px;">
             <h3 class="text-center mb-4 fw-bold">Member Login</h3>
             {% if error %}<div class="alert alert-danger py-2 small">{{ error }}</div>{% endif %}
-            
             <form method="POST" action="/login" id="loginForm">
                 <div class="mb-3">
                     <label class="form-label small fw-bold text-muted">Account</label>
-                    <input type="text" id="login_account" name="account" class="form-control py-2" 
-                           style="border-radius: 10px;" placeholder="Enter your account" required>
+                    <input type="text" id="login_account" name="account" class="form-control py-2" style="border-radius: 10px;" required>
                 </div>
                 <div class="mb-3">
                     <label class="form-label small fw-bold text-muted">Password</label>
-                    <input type="password" name="password" class="form-control py-2" 
-                           style="border-radius: 10px;" placeholder="Enter your password" required>
+                    <input type="password" name="password" class="form-control py-2" style="border-radius: 10px;" required>
                 </div>
-                
                 <div class="mb-4 form-check">
                     <input type="checkbox" class="form-check-input" id="rememberMe" checked>
                     <label class="form-check-label small text-muted" for="rememberMe">Remember Account</label>
                 </div>
-
-                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold shadow-sm" 
-                        style="border-radius: 10px;">Login</button>
+                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold shadow-sm" style="border-radius: 10px;">Login</button>
             </form>
         </div>
     </div>
 </div>
-
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const loginAccountInput = document.getElementById('login_account');
-    const rememberMeCheckbox = document.getElementById('rememberMe');
-    const loginForm = document.getElementById('loginForm');
-
-    // 1. 頁面載入時：檢查是否有存過的帳號
-    const savedAccount = localStorage.getItem('member_account');
-    if (savedAccount) {
-        loginAccountInput.value = savedAccount;
-        rememberMeCheckbox.checked = true;
-    }
-
-    // 2. 表單提交時：根據勾選狀態決定要存還是刪
-    loginForm.addEventListener('submit', function() {
-        if (rememberMeCheckbox.checked) {
-            localStorage.setItem('member_account', loginAccountInput.value);
-        } else {
-            localStorage.removeItem('member_account');
-        }
+    const accInput = document.getElementById('login_account');
+    const saved = localStorage.getItem('member_account');
+    if (saved) accInput.value = saved;
+    document.getElementById('loginForm').addEventListener('submit', function() {
+        if (document.getElementById('rememberMe').checked) localStorage.setItem('member_account', accInput.value);
+        else localStorage.removeItem('member_account');
     });
 });
 </script>
@@ -361,18 +303,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
 @app.route('/')
 def index():
-    if 'token' in session and 'acc' in session:
+    if session.get('acc') and session.get('token'):
         return redirect(url_for('dashboard'))
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # --- 新增：攔截邏輯 ---
-    # 如果已經有 token 了，代表已經登入，直接跳轉到 dashboard
-    
-    if 'token' in session and 'acc' in session:
+    if session.get('acc') and session.get('token'):
         return redirect(url_for('dashboard'))
-    # --------------------
 
     if request.method == 'POST':
         acc, pw = request.form.get('account'), request.form.get('password')
@@ -380,148 +318,85 @@ def login():
             res = requests.post(f"{PHP_API_URL}/login", json={"account": acc, "password": pw}, timeout=5)
             if res.status_code == 200:
                 data = res.json()
-                
-                # 1. 開啟永久登入紀錄 (180天)
                 session.permanent = True
-                
-                # 2. 存入 Token 與 使用者名稱
                 session['token'] = data['token']
                 session['name'] = data['user']['name']
-                
-                # 3. 將帳密存入加密的 session，供 dashboard 自動重登使用
                 session['acc'] = acc
                 session['pw'] = pw
-                
+                session.modified = True # 確保寫入伺服器端
                 return redirect(url_for('dashboard'))
-            
             return render_page(LOGIN_CONTENT, error="Login Failed")
         except Exception as e:
-            print(f"Login Error: {e}")
             return render_page(LOGIN_CONTENT, error="Connection Error")
-            
     return render_page(LOGIN_CONTENT, error=None)
-
 
 @app.route('/dashboard')
 def dashboard():
-    # 只要 session 裡還有帳密，我們就不把他當作「未登入」
-    if 'acc' not in session or 'pw' not in session:
+    if not session.get('acc') or not session.get('pw'):
         return redirect(url_for('login'))
     
-    session.permanent = True   
-    # 建立一個統一的救援函式，減少重複代碼
+    session.permanent = True
     def get_data(token):
-        headers = {"Authorization": f"Bearer {token}"}
-        return requests.get(f"{PHP_API_URL}/my-orders", headers=headers, timeout=5)
+        return requests.get(f"{PHP_API_URL}/my-orders", headers={"Authorization": f"Bearer {token}"}, timeout=5)
 
     try:
-        # 如果連 token 都沒了，直接啟動救援
-        if 'token' not in session:
-            raise Exception("No Token")
-
+        if not session.get('token'): raise Exception("No Token")
         res = get_data(session['token'])
         
-        # 如果 Token 過期 (401)，啟動救援
-        if res.status_code == 401:
-            print("Token expired in Dashboard, rescuing...")
-            re_login = requests.post(f"{PHP_API_URL}/login", 
-                                   json={"account": session['acc'], "password": session['pw']}, timeout=5)
-            if re_login.status_code == 200:
-                session['token'] = re_login.json()['token']
-                res = get_data(session['token'])
-            else:
-                # 連帳密都錯了才去登入頁，但「絕對不清除 session」，保留使用者輸入的帳密
-                return redirect(url_for('login'))
-
-        orders = res.json().get('orders', [])
-    except Exception as e:
-        print(f"Dashboard Soft Error: {e}")
-        orders = [] # 發生錯誤時顯示空列表，不要把人踢走
-
-    return render_page(DASHBOARD_CONTENT, orders=orders)
-
-
-@app.route('/update_password', methods=['POST'])
-def update_password():
-    if 'token' not in session: return {"message": "Unauthorized"}, 401
-    
-    pw_data = request.json
-    new_password = pw_data.get('password') # 取得新密碼
-    
-    headers = {"Authorization": f"Bearer {session['token']}"}
-    try:
-        res = requests.post(f"{PHP_API_URL}/update-password", json=pw_data, headers=headers, timeout=5)
-        
-        if res.status_code == 200:
-            # 修改成功，直接清空 Session，強迫使用者重新登入
-            session.clear() 
-            return {"message": "Success. Please login again with your new password."}, 200
-            
-        return res.json(), res.status_code
-    except:
-        return {"message": "Connection Error"}, 500
-        
-        
-@app.route('/get_barcode/<payment_id>')
-def get_barcode(payment_id):
-    if 'acc' not in session or 'pw' not in session:
-        return redirect(url_for('login'))
-        
-    try:
-        # 確保有 Token 才做事
-        if 'token' not in session:
-            # 這裡不跳轉，直接在後台補登
-            re_login = requests.post(f"{PHP_API_URL}/login", 
-                                   json={"account": session['acc'], "password": session['pw']}, timeout=5)
-            if re_login.status_code == 200:
-                session['token'] = re_login.json()['token']
-            else:
-                return redirect(url_for('login'))
-
-        headers = {"Authorization": f"Bearer {session['token']}"}
-        res = requests.post(f"{PHP_API_URL}/get-payment-url", json={"payment_id": payment_id}, headers=headers, timeout=5)
-
-        # Token 救援邏輯
         if res.status_code == 401:
             re_login = requests.post(f"{PHP_API_URL}/login", json={"account": session['acc'], "password": session['pw']}, timeout=5)
             if re_login.status_code == 200:
                 session['token'] = re_login.json()['token']
-                headers = {"Authorization": f"Bearer {session['token']}"}
-                res = requests.post(f"{PHP_API_URL}/get-payment-url", json={"payment_id": payment_id}, headers=headers, timeout=5)
+                session.modified = True
+                res = get_data(session['token'])
             else:
                 return redirect(url_for('login'))
+        orders = res.json().get('orders', [])
+    except:
+        orders = []
+    return render_page(DASHBOARD_CONTENT, orders=orders)
 
-        # ... 後續處理 barcode 邏輯不變 ...
-        # ------------------
+@app.route('/get_barcode/<payment_id>')
+def get_barcode(payment_id):
+    if not session.get('acc') or not session.get('pw'):
+        return redirect(url_for('login'))
+    try:
+        if not session.get('token'):
+            re_login = requests.post(f"{PHP_API_URL}/login", json={"account": session['acc'], "password": session['pw']}, timeout=5)
+            if re_login.status_code == 200:
+                session['token'] = re_login.json()['token']
+                session.modified = True
+            else: return redirect(url_for('login'))
+
+        res = requests.post(f"{PHP_API_URL}/get-payment-url", json={"payment_id": payment_id}, headers={"Authorization": f"Bearer {session['token']}"}, timeout=5)
+        if res.status_code == 401:
+            re_login = requests.post(f"{PHP_API_URL}/login", json={"account": session['acc'], "password": session['pw']}, timeout=5)
+            if re_login.status_code == 200:
+                session['token'] = re_login.json()['token']
+                session.modified = True
+                res = requests.post(f"{PHP_API_URL}/get-payment-url", json={"payment_id": payment_id}, headers={"Authorization": f"Bearer {session['token']}"}, timeout=5)
+            else: return redirect(url_for('login'))
 
         data = res.json()
-        if res.status_code == 200 or res.status_code == 400:
-            barcode_data = data.get('barcode')
-            if barcode_data and barcode_data.get('barcode_3'):
-                try:
-                    raw_amount = barcode_data['barcode_3'][-5:]
-                    barcode_data['amount'] = int(raw_amount)
-                except:
-                    barcode_data['amount'] = 0
-                return render_page(BARCODE_PAGE, b=barcode_data)
-
+        if res.status_code in [200, 400]:
+            b = data.get('barcode')
+            if b and b.get('barcode_3'):
+                try: b['amount'] = int(b['barcode_3'][-5:])
+                except: b['amount'] = 0
+                return render_page(BARCODE_PAGE, b=b)
         return f"Error: {data.get('message', 'Unknown Error')}"
-    except Exception as e:
-        print(f"Barcode Error: {str(e)}")
-        return "System Error"
+    except: return "System Error"
 
-# 請檢查 app.py 裡是否有這一段
-@app.route('/payment/callback/proxy', methods=['POST'])
-def payment_callback_proxy():
-    payment_data = request.form.to_dict()
-    print("--- Received Callback Proxy ---")
+@app.route('/update_password', methods=['POST'])
+def update_password():
+    if not session.get('token'): return {"message": "Unauthorized"}, 401
     try:
-        # 轉發給 PHP
-        res = requests.post(f"{PHP_API_URL}/payment/callback", data=payment_data, timeout=10)
-        return res.text
-    except Exception as e:
-        return f"Proxy Error: {str(e)}", 500
-
+        res = requests.post(f"{PHP_API_URL}/update-password", json=request.json, headers={"Authorization": f"Bearer {session['token']}"}, timeout=5)
+        if res.status_code == 200:
+            session.clear()
+            return {"message": "Success"}, 200
+        return res.json(), res.status_code
+    except: return {"message": "Error"}, 500
 
 @app.route('/logout')
 def logout():
@@ -529,4 +404,4 @@ def logout():
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
