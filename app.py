@@ -23,7 +23,7 @@ limiter = Limiter(
 )
 
 
-IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
+IS_LOCAL = True  # 在本機測試設為 True，搬到 AWS 設為 False
 
 # --- 伺服器端 Session 儲存目錄設定 ---
 session_dir = os.path.join(os.getcwd(), 'flask_session')
@@ -129,43 +129,53 @@ DASHBOARD_CONTENT = """
                         </tr>
                     </thead>
                     <tbody>
-                        {% set flag = namespace(can_pay=true) %}
-                        {% for s in order.payment_schedule %}
-                        <tr class="border-bottom-dashed">
-                            <td class="py-2 small text-muted text-nowrap">
-                                {{ s.date[:10] if s.date else '-' }}
-                            </td>
-                            <td class="py-2 fw-bold text-nowrap">
-                                ${{ "{:,.0f}".format(s.amount | float) }}
-                            </td>
-                            <td class="py-2 text-end pe-2">
-                                {% if s.status == 'Paid' or s.status == '已支付' %}
-                                    <div class="text-success fw-bold" style="font-size: 0.75rem;">
-                                        <i class="fas fa-check-circle"></i> Paid
-                                    </div>
-                                    <div class="text-success" style="font-size: 0.65rem; margin-top: -2px;">
-                                        {{ s.actual_remittance_date[:10] if s.actual_remittance_date else '' }}
-                                    </div>
-                                {% else %}
-                                    {% if flag.can_pay %}
+                    {% set flag = namespace(can_pay=true) %}
+                    {% for s in order.payment_schedule %}
+                    <tr class="border-bottom-dashed">
+                        <td class="py-2 small text-muted text-nowrap">
+                            {{ s.date[:10] if s.date else '-' }}
+                        </td>
+                        
+                        <td class="py-2 fw-bold text-nowrap">
+                            ${{ "{:,.0f}".format(s.amount | float) }}
+                        </td>
+
+                        <td class="py-2 text-end pe-2">
+                            {% if s.status == 'Paid' or s.status == '已支付' %}
+                                <div class="text-success fw-bold" style="font-size: 0.75rem;">
+                                    <i class="fas fa-check-circle"></i> Paid
+                                </div>
+                                <div class="text-success" style="font-size: 0.65rem; margin-top: -2px;">
+                                    {{ s.actual_remittance_date[:10] if s.actual_remittance_date else '' }}
+                                </div>
+                            {% else %}
+                                {% if flag.can_pay %}
+                                    <div class="text-end">
                                         <a href="/get_barcode/{{ s.id }}" 
                                            class="btn btn-sm {% if s.has_barcode or s.barcode_1 %}btn-success{% else %}btn-primary{% endif %} shadow-sm fw-bold"
                                            style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;">
                                            <i class="fas {% if s.has_barcode or s.barcode_1 %}fa-eye{% else %}fa-magic{% endif %} me-1"></i>
                                            {{ 'View Barcode' if (s.has_barcode or s.barcode_1) else 'Get Barcode' }}
                                         </a>
-                                        {% set flag.can_pay = false %}
-                                    {% else %}
-                                        <div class="text-end">
-                                            <span class="badge bg-light text-muted border fw-normal" style="font-size: 0.65rem; padding: 4px 8px;">Pending</span>
-                                            <div class="text-muted" style="font-size: 0.55rem; margin-top: 2px; letter-spacing: -0.2px;">Wait 5-7 days for sync</div>
+                                        
+                                        {# --- 判斷：僅在 View Barcode 模式下顯示提醒文字 --- #}
+                                        {% if s.has_barcode or s.barcode_1 %}
+                                        <div class="text-muted" style="font-size: 0.55rem; margin-top: 2px; letter-spacing: -0.2px;">
+                                            Auto-sync takes 5-7 days after payment.
                                         </div>
-                                    {% endif %}
+                                        {% endif %}
+                                    </div>
+                                    {% set flag.can_pay = false %}
+                                {% else %}
+                                    <div class="text-end">
+                                        <span class="badge bg-light text-muted border fw-normal" style="font-size: 0.65rem; padding: 4px 8px;">Pending</span>
+                                    </div>
                                 {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
                 </table>
             </div>
 
@@ -280,6 +290,23 @@ BARCODE_PAGE = """
 LOGIN_CONTENT = """
 <div class="row justify-content-center mt-5">
     <div class="col-md-5 col-12">
+    
+    <div class="alert alert-warning border-0 shadow-sm mb-4" style="border-radius: 15px; border-left: 5px solid #ffc107;">
+            <div class="d-flex">
+                <i class="fas fa-tools mt-1 me-3 text-dark"></i>
+                <div>
+                    <h6 class="fw-bold mb-1"> (Maintenance Notice)</h6>
+                    <div class="small text-dark">                    
+                        <div class="text-muted mt-1" style="font-size: 0.7rem; border-top: 1px solid rgba(0,0,0,0.05); pt-1">
+                            Under Maintenance: 12/31 09:30 – 18:00. Login is temporarily disabled. Thank you for your patience.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        
+        
         <div class="card p-4 shadow-sm" style="border-radius: 20px;">
             <h3 class="text-center mb-4 fw-bold">Member Login</h3>
             {% if error %}<div class="alert alert-danger py-2 small">{{ error }}</div>{% endif %}
