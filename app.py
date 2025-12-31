@@ -23,7 +23,7 @@ limiter = Limiter(
 )
 
 
-IS_LOCAL = True  # 在本機測試設為 True，搬到 AWS 設為 False
+IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
 
 # --- 伺服器端 Session 儲存目錄設定 ---
 session_dir = os.path.join(os.getcwd(), 'flask_session')
@@ -289,24 +289,7 @@ BARCODE_PAGE = """
 
 LOGIN_CONTENT = """
 <div class="row justify-content-center mt-5">
-    <div class="col-md-5 col-12">
-    
-    <div class="alert alert-warning border-0 shadow-sm mb-4" style="border-radius: 15px; border-left: 5px solid #ffc107;">
-            <div class="d-flex">
-                <i class="fas fa-tools mt-1 me-3 text-dark"></i>
-                <div>
-                    <h6 class="fw-bold mb-1"> (Maintenance Notice)</h6>
-                    <div class="small text-dark">                    
-                        <div class="text-muted mt-1" style="font-size: 0.7rem; border-top: 1px solid rgba(0,0,0,0.05); pt-1">
-                            Under Maintenance: 12/31 09:30 – 18:00. Login is temporarily disabled. Thank you for your patience.
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        
-        
+    <div class="col-md-5 col-12">     
         <div class="card p-4 shadow-sm" style="border-radius: 20px;">
             <h3 class="text-center mb-4 fw-bold">Member Login</h3>
             {% if error %}<div class="alert alert-danger py-2 small">{{ error }}</div>{% endif %}
