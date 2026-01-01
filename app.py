@@ -417,6 +417,47 @@ def get_barcode(payment_id):
         return f"Error: {data.get('message', 'Unknown Error')}"
     except: return "System Error"
 
+
+# 在 app.py 接近底部的位置加入：
+@app.route('/payment/callback/proxy', methods=['POST'])
+def payment_callback_proxy():
+    """
+    接收速買配 (SmilePay) 的回傳並轉發給 PHP API 進行核銷
+    """
+    try:
+        # 1. 取得速買配傳過來的 POST 資料 (這會包含 Smseid, Amount, 等參數)
+        smilepay_data = request.form.to_dict()
+        
+        # 如果是空的，代表這可能不是正確的 POST 請求
+        if not smilepay_data:
+            return "No data received", 400
+
+        # 2. 轉發給內部 PHP API
+        # 這裡會組合成 http://172.31.24.161/api/payment/callback
+        php_callback_url = f"{PHP_API_URL}/payment/callback"
+        
+        # 使用 requests 發送 POST
+        php_response = requests.post(
+            php_callback_url, 
+            data=smilepay_data, 
+            timeout=10 # 設定超時避免卡死
+        )
+        
+        # 3. 把 PHP 的處理結果回傳給速買配
+        # PHP 那邊會回傳 "1|OK" 或 "0|BarcodeNotFound" 等字串
+        if php_response.status_code == 200:
+            return php_response.text
+        else:
+            # 如果 PHP 噴錯 (500 等)，回報給 Python Log
+            print(f"PHP API Error: {php_response.status_code} - {php_response.text}")
+            return f"Backend Error: {php_response.status_code}", 500
+            
+    except Exception as e:
+        print(f"Proxy Critical Error: {str(e)}")
+        return "Internal Proxy Error", 500
+        
+        
+        
 @app.route('/update_password', methods=['POST'])
 def update_password():
     if not session.get('token'): return {"message": "Unauthorized"}, 401
