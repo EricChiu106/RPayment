@@ -24,7 +24,7 @@ limiter = Limiter(
 )
 
 
-IS_LOCAL = True  # 在本機測試設為 True，搬到 AWS 設為 False
+IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
 
 # --- 伺服器端 Session 儲存目錄設定 ---
 session_dir = os.path.join(os.getcwd(), 'flask_session')
