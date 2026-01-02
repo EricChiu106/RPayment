@@ -1,0 +1,10 @@
+# 排除 Flask-Session 產生的快取資料夾
+flask_session/
+
+# 排除 Python 編譯檔案
+__pycache__/
+*.pyc
+
+# 排除虛擬環境
+venv/
+.env

@@ -1,11 +1,12 @@
-import os
-from flask import Flask, render_template_string, request, redirect, url_for, session
+import os                          
+from flask import Flask, render_template_string, request, redirect, url_for, session, jsonify
 import requests
-from datetime import timedelta
+from datetime import datetime,  timedelta
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_session import Session # 伺服器端執行: pip install flask-session
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+import time
 
 app = Flask(__name__)
 
@@ -23,7 +24,7 @@ limiter = Limiter(
 )
 
 
-IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
+IS_LOCAL = True  # 在本機測試設為 True，搬到 AWS 設為 False
 
 # --- 伺服器端 Session 儲存目錄設定 ---
 session_dir = os.path.join(os.getcwd(), 'flask_session')
@@ -151,21 +152,29 @@ DASHBOARD_CONTENT = """
                             {% else %}
                                 {% if flag.can_pay %}
                                     <div class="text-end">
-                                        <a href="/get_barcode/{{ s.id }}" 
-                                           class="btn btn-sm {% if s.has_barcode or s.barcode_1 %}btn-success{% else %}btn-primary{% endif %} shadow-sm fw-bold"
-                                           style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;">
-                                           <i class="fas {% if s.has_barcode or s.barcode_1 %}fa-eye{% else %}fa-magic{% endif %} me-1"></i>
-                                           {{ 'View Barcode' if (s.has_barcode or s.barcode_1) else 'Get Barcode' }}
-                                        </a>
-                                        
-                                        {# --- 判斷：僅在 View Barcode 模式下顯示提醒文字 --- #}
-                                        {% if s.has_barcode or s.barcode_1 %}
-                                        <div class="text-muted" style="font-size: 0.55rem; margin-top: 2px; letter-spacing: -0.2px;">
-                                            Auto-sync takes 5-7 days after payment.
-                                        </div>
+                                        {# --- 核心修改：判斷是否已開放索取，或是已經有條碼記錄了 --- #}
+                                        {% if s.is_open or s.has_barcode or s.barcode_1 %}
+                                            <a href="/get_barcode/{{ s.id }}" 
+                                               class="btn btn-sm {% if (s.has_barcode and s.has_barcode != '0') or (s.barcode_1 and s.barcode_1 != '0') %}btn-success{% else %}btn-primary{% endif %} shadow-sm fw-bold"
+                                               style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;">
+                                               <i class="fas {% if s.has_barcode or s.barcode_1 %}fa-eye{% else %}fa-magic{% endif %} me-1"></i>
+                                              {{ 'View Barcode' if (s.has_barcode and s.has_barcode != '0') or (s.barcode_1 and s.barcode_1 != '0') else 'Get Barcode' }}
+                                            </a>
+                                            
+                                            {% if s.has_barcode or s.barcode_1 %}
+                                            <div class="text-muted" style="font-size: 0.55rem; margin-top: 2px; letter-spacing: -0.2px;">
+                                                 Auto-sync takes 5-7 days after payment.
+                                            </div>
+                                            {% endif %}
+                                            {% set flag.can_pay = false %}
+                                        {% else %}
+                                            {# --- 未開放索取時顯示鎖定狀態與日期 --- #}
+                                           <div class="text-muted" style="font-size: 0.65rem; padding: 4px 0;">
+                                                <i class="fas fa-clock me-1"></i>Open: {{ s.open_date_str }}
+                                           </div>
+                                            {% set flag.can_pay = false %}
                                         {% endif %}
                                     </div>
-                                    {% set flag.can_pay = false %}
                                 {% else %}
                                     <div class="text-end">
                                         <span class="badge bg-light text-muted border fw-normal" style="font-size: 0.65rem; padding: 4px 8px;">Pending</span>
@@ -212,6 +221,12 @@ DASHBOARD_CONTENT = """
     </div>
 </div>
 <script>
+window.onpageshow = function(event) {
+    if (event.persisted || (window.performance && window.performance.navigation.type === 2)) {
+        window.location.reload();
+    }
+};
+
 function updatePassword() {
     const pw = document.getElementById('new_pw').value;
     const confirmPw = document.getElementById('confirm_pw').value;
@@ -236,53 +251,82 @@ function updatePassword() {
 """
 
 BARCODE_PAGE = """
-<div class="text-center mb-4">
-    <p class="text-danger small fw-bold">
-        <i class="fas fa-sun me-1"></i>Please turn your screen brightness to maximum and present this to the clerk.
-    </p>
-</div>
+<div class="container py-2">
+    {# --- Condition 1: If Barcode is Expired --- #}
+    {% if b.is_expired %}
+    <div class="card shadow border-0 p-4 text-center" style="border-radius: 20px; margin-top: 50px;">
+        <div class="py-5">
+            <i class="fas fa-exclamation-triangle text-danger mb-4" style="font-size: 4rem;"></i>
+            <h4 class="fw-bold text-dark">Barcode Expired</h4>
+            <p class="text-muted small px-3">This barcode has passed its payment deadline and is no longer valid for transaction.</p>
+            
+            <div class="alert alert-danger border-0 small mt-4 mx-2 fw-bold" style="border-radius: 12px; background-color: #fff5f5; color: #e53e3e;">
+                <i class="fas fa-headset me-1"></i> CONTACT CUSTOMER SERVICE
+            </div>
 
-<div class="card mb-3 border-0 shadow-sm" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px;">
-    <div class="card-body text-center text-white py-3">
-        <div class="small opacity-75">Total Amount Due</div>
-        <div class="fs-2 fw-bold">${{ "{:,.0f}".format(b.amount | float) }}</div>
+            <div class="px-3 mt-4">
+                <button onclick="goBack()" class="btn btn-outline-secondary w-100 py-2 small border-0">
+                    Back to Order List
+                </button>
+            </div>
+        </div>
     </div>
-</div>
 
-<div class="card p-3 mb-4 shadow border-0" style="border-radius: 20px;">
-    <div class="text-center mb-4"><svg id="barcode1"></svg><div class="fw-bold small">{{ b.barcode_1 }}</div></div>
-    <div class="text-center mb-4"><svg id="barcode2"></svg><div class="fw-bold small">{{ b.barcode_2 }}</div></div>
-    <div class="text-center mb-4"><svg id="barcode3"></svg><div class="fw-bold small">{{ b.barcode_3 }}</div></div>
-    <div class="mt-2 text-center border-top pt-3">
-        <div class="text-danger fw-bold small">Payment Deadline</div>
-        <div class="fs-5 fw-bold text-dark">{{ b.expired_at }}</div>
+    {# --- Condition 2: Normal Display --- #}
+    {% else %}
+    <div class="text-center mb-4">
+        <p class="text-danger small fw-bold">
+            <i class="fas fa-sun me-1"></i>Please turn your screen brightness to maximum and present this to the clerk.
+        </p>
     </div>
-</div>
 
-<div class="notice-box p-3 mb-4 shadow-sm">
-    <h6 class="fw-bold text-dark mb-2"><i class="fas fa-info-circle text-warning me-1"></i> Payment Notice</h6>
-    <ul class="small text-muted mb-0 ps-3">
-        <li class="mb-2">After payment, please <b>take a photo of the receipt</b> and send to our <b>LINE</b>.</li>
-        <li class="mb-2">Verification takes <b>5 to 7 working days</b>.</li>
-        <li>Status will <b>automatically update</b>. Thank you!</li>
-    </ul>
-</div>
+    <div class="card mb-3 border-0 shadow-sm" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px;">
+        <div class="card-body text-center text-white py-3">
+            <div class="small opacity-75">Total Amount Due</div>
+            <div class="fs-2 fw-bold">${{ "{:,.0f}".format(b.amount | float) }}</div>
+        </div>
+    </div>
 
-<div class="px-2 mb-5">
-    <button onclick="goBack()" class="btn btn-outline-primary w-100 py-3 fw-bold rounded-3 shadow-sm">
-        <i class="fas fa-arrow-left me-2"></i>Back to Order List
-    </button>
+    <div class="card p-3 mb-4 shadow border-0" style="border-radius: 20px;">
+        <div class="text-center mb-4"><svg id="barcode1"></svg><div class="fw-bold small">{{ b.barcode_1 }}</div></div>
+        <div class="text-center mb-4"><svg id="barcode2"></svg><div class="fw-bold small">{{ b.barcode_2 }}</div></div>
+        <div class="text-center mb-4"><svg id="barcode3"></svg><div class="fw-bold small">{{ b.barcode_3 }}</div></div>
+        <div class="mt-2 text-center border-top pt-3">
+            <div class="text-danger fw-bold small">Payment Deadline</div>
+            <div class="fs-5 fw-bold text-dark">{{ b.expired_at }}</div>
+        </div>
+    </div>
+
+    <div class="notice-box p-3 mb-4 shadow-sm" style="background-color: #f8f9fa; border-radius: 15px; border-left: 4px solid #ffc107;">
+        <h6 class="fw-bold text-dark mb-2"><i class="fas fa-info-circle text-warning me-1"></i> Payment Notice</h6>
+        <ul class="small text-muted mb-0 ps-3">
+            <li class="mb-2">After payment, please <b>take a photo of the receipt</b> and send to our <b>LINE</b>.</li>
+            <li class="mb-2">Verification takes <b>5 to 7 working days</b>.</li>
+            <li>Status will <b>automatically update</b>. Thank you!</li>
+        </ul>
+    </div>
+
+    <div class="px-2 mb-5">
+        <button onclick="goBack()" class="btn btn-outline-primary w-100 py-3 fw-bold rounded-3 shadow-sm">
+            <i class="fas fa-arrow-left me-2"></i>Back to Order List
+        </button>
+    </div>
+    {% endif %}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script>
+    {# Render barcodes only if NOT expired #}
+    {% if not b.is_expired %}
     const opt = { format: "CODE39", width: 1, height: 60, displayValue: false, margin: 10 };
     JsBarcode("#barcode1", "{{ b.barcode_1 }}", opt);
     JsBarcode("#barcode2", "{{ b.barcode_2 }}", opt);
     JsBarcode("#barcode3", "{{ b.barcode_3 }}", opt);
-    function goBack() { 
-        if (document.referrer.includes('dashboard')) window.history.back();
-        else window.location.href = '/dashboard';
+    {% endif %}
+
+    function goBack() {
+        // Redirect with timestamp to force dashboard refresh
+        window.location.href = '/dashboard?t=' + new Date().getTime();
     }
 </script>
 """
@@ -381,49 +425,138 @@ def dashboard():
                 res = get_data(session['token'])
             else:
                 return redirect(url_for('login'))
+        
         orders = res.json().get('orders', [])
-    except:
+
+        # --- 處理日期與條碼顯示邏輯 ---
+        now = datetime.now()
+        for order in orders:
+            for s in order.get('payment_schedule', []):
+                # 1. 檢查是否已經有條碼資料 (排除空值、None 或字串 '0')
+                has_existing_code = bool(s.get('barcode_1') and s.get('barcode_1') != '0') or \
+                                    bool(s.get('has_barcode') and s.get('has_barcode') != '0')
+
+                if s.get('date'):
+                    try:
+                        # 轉換日期字串為 datetime 物件
+                        due_date = datetime.strptime(s['date'][:10], '%Y-%m-%d')
+                        # 計算開放日期 (截止前 20 天)
+                        open_date = due_date - timedelta(days=20)
+                        
+                        # 邏輯：(現在時間到了) OR (已經有條碼了) 都要開放按鈕
+                        s['is_open'] = (now >= open_date) or has_existing_code
+                        s['open_date_str'] = open_date.strftime('%Y-%m-%d')
+                    except:
+                        s['is_open'] = has_existing_code
+                        s['open_date_str'] = 'Pending'
+                else:
+                    # 沒有日期時，僅依據是否有條碼來決定是否開放
+                    s['is_open'] = has_existing_code
+                    s['open_date_str'] = 'Pending'
+        # -----------------------
+        
+        # 存入 session 備用（供 get_barcode 檢查用）
+        session['orders'] = orders
+        session.modified = True
+
+    except Exception as e:
+        print(f"Dashboard Error: {e}")
         orders = []
+        
     return render_page(DASHBOARD_CONTENT, orders=orders)
+
+
 
 @app.route('/get_barcode/<payment_id>')
 def get_barcode(payment_id):
     if not session.get('acc') or not session.get('pw'):
         return redirect(url_for('login'))
+    
     try:
+        # --- 1. 從 Session 找這筆資料做初步日期攔截 ---
+        orders = session.get('orders', [])
+        payment_info = None
+        for order in orders:
+            for s in order.get('payment_schedule', []):
+                if str(s.get('id')) == str(payment_id):
+                    payment_info = s
+                    break
+            if payment_info: break
+
+        # 攔截：如果時間還沒到 20 天開放期，直接擋掉
+        if payment_info and payment_info.get('date'):
+            try:
+                due_date = datetime.strptime(payment_info['date'][:10], '%Y-%m-%d')
+                open_date = due_date - timedelta(days=20)
+                # 若時間未到且目前沒條碼，顯示可用日期
+                if datetime.now() < open_date and not (payment_info.get('has_barcode') or payment_info.get('barcode_1')):
+                    return f"Available after: {open_date.strftime('%Y-%m-%d')}"
+            except Exception as date_e:
+                print(f"Date check error: {date_e}")
+
+        # --- 2. Token 驗證與處理 ---
         if not session.get('token'):
             re_login = requests.post(f"{PHP_API_URL}/login", json={"account": session['acc'], "password": session['pw']}, timeout=5)
             if re_login.status_code == 200:
                 session['token'] = re_login.json()['token']
                 session.modified = True
-            else: return redirect(url_for('login'))
+            else: 
+                return redirect(url_for('login'))
 
-        res = requests.post(f"{PHP_API_URL}/get-payment-url", json={"payment_id": payment_id}, headers={"Authorization": f"Bearer {session['token']}"}, timeout=5)
+        # --- 3. 正式索取條碼資料 ---
+        res = requests.post(f"{PHP_API_URL}/get-payment-url", 
+                            json={"payment_id": payment_id}, 
+                            headers={"Authorization": f"Bearer {session['token']}"}, 
+                            timeout=5)
+        
+        # 處理 401 Token 過期
         if res.status_code == 401:
             re_login = requests.post(f"{PHP_API_URL}/login", json={"account": session['acc'], "password": session['pw']}, timeout=5)
             if re_login.status_code == 200:
                 session['token'] = re_login.json()['token']
                 session.modified = True
                 res = requests.post(f"{PHP_API_URL}/get-payment-url", json={"payment_id": payment_id}, headers={"Authorization": f"Bearer {session['token']}"}, timeout=5)
-            else: return redirect(url_for('login'))
+            else: 
+                return redirect(url_for('login'))
 
+        # --- 4. 解析資料並判定是否過期 ---
         data = res.json()
         if res.status_code in [200, 400]:
             b = data.get('barcode')
             if b and b.get('barcode_3'):
-                try: b['amount'] = int(b['barcode_3'][-5:])
-                except: b['amount'] = 0
+                # --- 新增：判定條碼是否過期 ---
+                b['is_expired'] = False
+                # 取得條碼截止日 (優先用 API 的 expired_at，否則用原始截止日)
+                expire_date_str = b.get('expired_at') or (payment_info.get('date') if payment_info else None)
+                
+                if expire_date_str:
+                    try:
+                        # 轉為 datetime 物件，並設定為該日 23:59:59 為最終期限
+                        expire_dt = datetime.strptime(expire_date_str[:10], '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+                        if datetime.now() > expire_dt:
+                            b['is_expired'] = True
+                    except:
+                        pass
+
+                # 計算金額 (取 barcode_3 後五碼)
+                try: 
+                    b['amount'] = int(b['barcode_3'][-5:])
+                except: 
+                    b['amount'] = 0
+                
+                # 渲染你剛才設定好的全英文 BARCODE_PAGE
                 return render_page(BARCODE_PAGE, b=b)
+        
         return f"Error: {data.get('message', 'Unknown Error')}"
-    except: return "System Error"
+    
+    except Exception as e: 
+        print(f"Get Barcode Critical Error: {e}") 
+        return "System Error"
 
 
-# 在 app.py 接近底部的位置加入：
 @app.route('/payment/callback/proxy', methods=['POST'])
 def payment_callback_proxy():
-    """
-    接收速買配 (SmilePay) 的回傳並轉發給 PHP API 進行核銷
-    """
+
     try:
         # 1. 取得速買配傳過來的 POST 資料 (這會包含 Smseid, Amount, 等參數)
         smilepay_data = request.form.to_dict()
@@ -432,8 +565,7 @@ def payment_callback_proxy():
         if not smilepay_data:
             return "No data received", 400
 
-        # 2. 轉發給內部 PHP API
-        # 這裡會組合成 http://172.31.24.161/api/payment/callback
+ 
         php_callback_url = f"{PHP_API_URL}/payment/callback"
         
         # 使用 requests 發送 POST
@@ -443,7 +575,6 @@ def payment_callback_proxy():
             timeout=10 # 設定超時避免卡死
         )
         
-        # 3. 把 PHP 的處理結果回傳給速買配
         # PHP 那邊會回傳 "1|OK" 或 "0|BarcodeNotFound" 等字串
         if php_response.status_code == 200:
             return php_response.text
@@ -456,8 +587,9 @@ def payment_callback_proxy():
         print(f"Proxy Critical Error: {str(e)}")
         return "Internal Proxy Error", 500
         
-        
-        
+ 
+
+    
 @app.route('/update_password', methods=['POST'])
 def update_password():
     if not session.get('token'): return {"message": "Unauthorized"}, 401
