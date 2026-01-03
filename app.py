@@ -24,7 +24,7 @@ limiter = Limiter(
 )
 
 
-IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
+IS_LOCAL = True  # 在本機測試設為 True，搬到 AWS 設為 False
 
 # --- 伺服器端 Session 儲存目錄設定 ---
 session_dir = os.path.join(os.getcwd(), 'flask_session')
@@ -82,8 +82,9 @@ def render_page(template_body, **kwargs):
     """
     return render_template_string(html_layout.replace("{{ template_body | safe }}", template_body), **kwargs)
 
+
 DASHBOARD_CONTENT = """
-<div class="container py-2">
+<div class="container py-2" id="reconcile-app">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="fw-bold m-0">Hi, {{ session.get('name', 'Member') }}</h4>
         <div>
@@ -136,7 +137,6 @@ DASHBOARD_CONTENT = """
                         <td class="py-2 small text-muted text-nowrap">
                             {{ s.date[:10] if s.date else '-' }}
                         </td>
-                        
                         <td class="py-2 fw-bold text-nowrap">
                             ${{ "{:,.0f}".format(s.amount | float) }}
                         </td>
@@ -151,29 +151,42 @@ DASHBOARD_CONTENT = """
                                 </div>
                             {% else %}
                                 {% if flag.can_pay %}
-                                    <div class="text-end">
-                                        {# --- 核心修改：判斷是否已開放索取，或是已經有條碼記錄了 --- #}
+                                    <div class="text-end d-flex flex-column align-items-end">
+                                    {% if not s.has_report %}
                                         {% if s.is_open or s.has_barcode or s.barcode_1 %}
                                             <a href="/get_barcode/{{ s.id }}" 
-                                               class="btn btn-sm {% if (s.has_barcode and s.has_barcode != '0') or (s.barcode_1 and s.barcode_1 != '0') %}btn-success{% else %}btn-primary{% endif %} shadow-sm fw-bold"
-                                               style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;">
+                                               class="btn btn-sm {% if (s.has_barcode and s.has_barcode != '0') or (s.barcode_1 and s.barcode_1 != '0') %}btn-success{% else %}btn-primary{% endif %} shadow-sm fw-bold mb-1 w-100"
+                                               style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px; min-width: 100px;">
                                                <i class="fas {% if s.has_barcode or s.barcode_1 %}fa-eye{% else %}fa-magic{% endif %} me-1"></i>
-                                              {{ 'View Barcode' if (s.has_barcode and s.has_barcode != '0') or (s.barcode_1 and s.barcode_1 != '0') else 'Get Barcode' }}
+                                               {{ 'View Barcode' if (s.has_barcode and s.has_barcode != '0') or (s.barcode_1 and s.barcode_1 != '0') else 'Get Barcode' }}
                                             </a>
-                                            
-                                            {% if s.has_barcode or s.barcode_1 %}
-                                            <div class="text-muted" style="font-size: 0.55rem; margin-top: 2px; letter-spacing: -0.2px;">
-                                                 Auto-sync takes 5-7 days after payment.
-                                            </div>
-                                            {% endif %}
-                                            {% set flag.can_pay = false %}
                                         {% else %}
-                                            {# --- 未開放索取時顯示鎖定狀態與日期 --- #}
-                                           <div class="text-muted" style="font-size: 0.65rem; padding: 4px 0;">
-                                                <i class="fas fa-clock me-1"></i>Open: {{ s.open_date_str }}
-                                           </div>
-                                            {% set flag.can_pay = false %}
+                                            <div class="text-muted mb-1" style="font-size: 0.6rem;">
+                                                <i class="fas fa-clock me-1"></i>Barcode: {{ s.open_date_str if s.open_date_str else 'Soon' }}
+                                            </div>
                                         {% endif %}
+                                    {% endif %}
+                                        {% if s.has_report %}
+                                            <button class="btn btn-sm btn-light text-info border w-100 shadow-sm fw-bold" 
+                                                    style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;" disabled>
+                                                <i class="fas fa-history me-1"></i> Verifying
+                                            </button>
+                                            <div class="text-danger mt-1 fw-bold" style="font-size: 0.62rem; letter-spacing: -0.2px;">
+                                                   <i class="fas fa-exclamation-circle me-1"></i>Verification: 5-7 working days
+                                            </div>
+                                        {% else %}
+                                            <button class="btn btn-sm btn-outline-info fw-bold w-100 shadow-sm btn-trigger-transfer" 
+                                                    style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;"
+                                                    data-bs-toggle="modal" 
+                                                    data-bs-target="#transferModal"
+                                                    data-order="{{ order.order_no }}"
+                                                    data-sid="{{ s.id }}"
+                                                    data-amount="{{ s.amount }}">
+                                                <i class="fas fa-university me-1"></i> Transfer
+                                            </button>
+                                        {% endif %}
+                                        
+                                        {% set flag.can_pay = false %}
                                     </div>
                                 {% else %}
                                     <div class="text-end">
@@ -184,7 +197,7 @@ DASHBOARD_CONTENT = """
                         </td>
                     </tr>
                     {% endfor %}
-                </tbody>
+                    </tbody>
                 </table>
             </div>
 
@@ -196,6 +209,8 @@ DASHBOARD_CONTENT = """
     </div>
     {% endfor %}
 </div>
+
+
 
 <div class="modal fade" id="pwModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -220,33 +235,180 @@ DASHBOARD_CONTENT = """
         </div>
     </div>
 </div>
+
+
+<div class="modal fade" id="transferModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow-lg" style="border-radius: 20px; border: none;">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="fw-bold"><i class="fas fa-university text-primary me-2"></i>Transfer Info</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-start">
+                <div class="p-3 mb-3" style="background-color: #f0faff; border-radius: 12px; border: 1px dashed #0dcaf0;">
+                    <div class="small text-muted mb-1">Our Account:</div>
+                    <div class="fw-bold text-dark">
+                        Bank Name: <span class="text-primary">CTBC (822)</span><br>
+                       Account: <span class="text-primary" id="bank-account-num">129542011991</span>                       
+                        <button class="btn btn-sm p-0 ms-1 text-secondary" onclick="copyAccountNumber()" title="Copy Account">
+                            <i class="fas fa-copy" id="copy-icon"></i>
+                            <span id="copy-text" style="font-size: 0.65rem; display: none;" class="text-success fw-bold">Copied!</span>
+                        </button>     
+                                <div class="mt-2 mb-2 fw-bold" style="color: #dc3545; font-size: 0.75rem; line-height: 1.4;">
+                            <i class="fas fa-check-circle me-1"></i>Done transfer? Please SUBMIT the form below & send receipt to LINE.
+                        </div>                        
+                    </div> 
+                </div>
+                <input type="hidden" id="report_sid">
+                <div class="mb-3">
+                    <label class="small fw-bold text-muted">Order No.</label>
+                    <input type="text" id="report_order_no" class="form-control bg-light" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="small fw-bold text-muted">Amount Paid ($)</label>
+                    <input type="number" id="report_amount" class="form-control">
+                </div>
+                <div class="mb-3">
+                    <label class="small fw-bold text-muted">Your Account Last 5 Digits</label>
+                    <input type="text" id="report_five" class="form-control" placeholder="e.g. 12345" maxlength="5">
+                    <div class="form-text text-muted" style="font-size: 0.7rem;">
+                        * For Cash Deposit, please enter <span class="fw-bold text-primary">00000</span>.
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-primary w-100 py-3 fw-bold" id="btn-submit-payment" style="border-radius: 12px;">Submit Report</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
-window.onpageshow = function(event) {
-    if (event.persisted || (window.performance && window.performance.navigation.type === 2)) {
-        window.location.reload();
-    }
-};
+document.addEventListener('DOMContentLoaded', function() {
+    // 1. 處理點擊 Transfer 按鈕 (委託模式，最穩定)
+    const appContainer = document.getElementById('reconcile-app');
+    appContainer.addEventListener('click', function(e) {
+        const btn = e.target.closest('.btn-trigger-transfer');
+        if (btn) {
+            const orderNo = btn.getAttribute('data-order');
+            const sid = btn.getAttribute('data-sid');
+            const amt = btn.getAttribute('data-amount');
 
-function updatePassword() {
-    const pw = document.getElementById('new_pw').value;
-    const confirmPw = document.getElementById('confirm_pw').value;
-    if (pw.length < 6) { alert("Min 6 characters"); return; }
-    if (pw !== confirmPw) { alert("Passwords do not match!"); return; }
-
-    fetch('/update_password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: pw })
-    })
-    .then(async res => {
-        if (res.ok) {
-           alert("Password updated! Please login again.");
-           window.location.href = '/login';
-        } else {
-            alert("Update Failed");
+            document.getElementById('report_order_no').value = orderNo;
+            document.getElementById('report_sid').value = sid;
+            document.getElementById('report_amount').value = amt;
+            document.getElementById('report_five').value = '';
+            console.log("Setting Modal Data:", orderNo);
         }
     });
+    
+
+
+
+    // 2. 處理 Submit 按鈕 (EventListener 模式)
+    const submitBtn = document.getElementById('btn-submit-payment');
+    if (submitBtn) {
+        submitBtn.addEventListener('click', function() {
+            const data = {
+                schedule_id: document.getElementById('report_sid').value,
+                order_no: document.getElementById('report_order_no').value,
+                amount: document.getElementById('report_amount').value,
+                last_five: document.getElementById('report_five').value
+            };
+
+            if (!data.amount || data.amount <= 0) return alert("Please enter a valid amount.");
+            if (!data.last_five || data.last_five.length !== 5) return alert("Please enter 5 digits. (00000 for Cash)");
+
+            const displayAcc = data.last_five === "00000" ? "00000 (Cash Deposit)" : data.last_five;
+            const confirmMsg = `OrderNo: ${data.order_no}\nAmount: $${Number(data.amount).toLocaleString()}\nLast_five: ${displayAcc}\n\nConfirm Submission?`;
+
+            if (!confirm(confirmMsg)) return;
+
+            fetch('/submit_transfer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            }).then(res => {
+                if (res.ok) {
+                    alert("Success! Verification takes 5-7 working days.");
+                    location.reload();
+                } else {
+                    alert("Submission Failed.");
+                }
+            });
+        });
+    }
+});
+
+  
+      function updatePassword() {
+        const newPw = document.getElementById('new_pw').value;
+        const confirmPw = document.getElementById('confirm_pw').value;
+
+        // 1. 基本檢查：是否為空
+        if (!newPw) {
+            alert("Please enter a new password.");
+            return;
+        }
+
+        // 2. 長度檢查 (對應您 HTML 的 placeholder: Min 6 characters)
+        if (newPw.length < 6) {
+            alert("Password must be at least 6 characters.");
+            return;
+        }
+
+        // 3. 關鍵比對：檢查兩次輸入是否一致
+        if (newPw !== confirmPw) {
+            alert("Passwords do not match. Please type again.");
+            return;
+        }
+
+        // 4. 正式送出
+        fetch('/update_password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: newPw })
+        }).then(res => {
+            if (res.ok) { 
+                alert("Password updated successfully!"); 
+                location.reload(); 
+            } else { 
+                alert("Update failed. Please try again."); 
+            }
+        }).catch(err => {
+            alert("Network error.");
+        });
+    }
+    
+    
+function copyAccountNumber() {
+    const accountNum = document.getElementById('bank-account-num').innerText;
+    const copyIcon = document.getElementById('copy-icon');
+    const copyText = document.getElementById('copy-text');
+
+    // 執行複製
+    navigator.clipboard.writeText(accountNum).then(() => {
+        // 視覺回饋：隱藏圖示，顯示 "Copied!" 文字
+        copyIcon.style.display = 'none';
+        copyText.style.display = 'inline';
+
+        // 1.5 秒後恢復原狀
+        setTimeout(() => {
+            copyIcon.style.display = 'inline';
+            copyText.style.display = 'none';
+        }, 1500);
+    }).catch(err => {
+        // 備用方案 (針對舊版瀏覽器)
+        const el = document.createElement('textarea');
+        el.value = accountNum;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+        alert("Account copied!");
+    });
 }
+
 </script>
 """
 
@@ -279,7 +441,14 @@ BARCODE_PAGE = """
             <i class="fas fa-sun me-1"></i>Please turn your screen brightness to maximum and present this to the clerk.
         </p>
     </div>
-
+    <div class="notice-box p-3 mb-4 shadow-sm" style="background-color: #f8f9fa; border-radius: 15px; border-left: 4px solid #ffc107;">
+        <h6 class="fw-bold text-dark mb-2"><i class="fas fa-info-circle text-warning me-1"></i> Payment Notice</h6>
+        <ul class="small text-muted mb-0 ps-3">
+            <li class="mb-2">After payment, please <b>take a photo of the receipt</b> and send to our <b>LINE</b>.</li>
+            <li class="mb-2 text-danger">Verification takes <b>5 to 7 working days</b>.</li>
+            <li>Status will <b>automatically update</b>. Thank you!</li>
+        </ul>
+    </div>
     <div class="card mb-3 border-0 shadow-sm" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px;">
         <div class="card-body text-center text-white py-3">
             <div class="small opacity-75">Total Amount Due</div>
@@ -297,14 +466,7 @@ BARCODE_PAGE = """
         </div>
     </div>
 
-    <div class="notice-box p-3 mb-4 shadow-sm" style="background-color: #f8f9fa; border-radius: 15px; border-left: 4px solid #ffc107;">
-        <h6 class="fw-bold text-dark mb-2"><i class="fas fa-info-circle text-warning me-1"></i> Payment Notice</h6>
-        <ul class="small text-muted mb-0 ps-3">
-            <li class="mb-2">After payment, please <b>take a photo of the receipt</b> and send to our <b>LINE</b>.</li>
-            <li class="mb-2">Verification takes <b>5 to 7 working days</b>.</li>
-            <li>Status will <b>automatically update</b>. Thank you!</li>
-        </ul>
-    </div>
+
 
     <div class="px-2 mb-5">
         <button onclick="goBack()" class="btn btn-outline-primary w-100 py-3 fw-bold rounded-3 shadow-sm">
@@ -467,6 +629,7 @@ def dashboard():
 
 
 
+
 @app.route('/get_barcode/<payment_id>')
 def get_barcode(payment_id):
     if not session.get('acc') or not session.get('pw'):
@@ -588,7 +751,50 @@ def payment_callback_proxy():
         return "Internal Proxy Error", 500
         
  
+@app.route('/submit_transfer', methods=['POST'])
+def submit_transfer():
+    data = request.json
+    
+    # 確保資料格式正確
+    try:
+        payload = {
+            "order_payment_id": int(data.get('schedule_id')), # 轉為整數
+            "order_no": str(data.get('order_no')),
+            "amount": float(data.get('amount')),           # 轉為浮點數
+            "last_five": str(data.get('last_five'))
+        }
+    except (TypeError, ValueError) as e:
+        return jsonify({"status": "error", "message": "Invalid data format"}), 400
+    
+    try:
+        response = requests.post(
+            f"{PHP_API_URL}/save-transfer-report", 
+            json=payload,
+            headers={"Authorization": f"Bearer {session.get('token')}"},
+            timeout=10 # 稍微增加超時時間，避免對帳查詢較久
+        )
+        
+        # 嘗試解析 JSON，若失敗則回傳原始錯誤文字
+        try:
+            result = response.json()
+        except:
+            result = {"message": response.text}
 
+        if response.status_code == 200:
+            return jsonify({"status": "success"})
+        else:
+            # 回傳 PHP 的具體報錯 (例如: 422 驗證失敗)
+            return jsonify({
+                "status": "error", 
+                "message": result.get('message', 'PHP Server Error')
+            }), response.status_code
+            
+    except requests.exceptions.Timeout:
+        return jsonify({"status": "error", "message": "Connection timeout"}), 504
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+        
+        
     
 @app.route('/update_password', methods=['POST'])
 def update_password():
