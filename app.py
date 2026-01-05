@@ -24,7 +24,7 @@ limiter = Limiter(
 )
 
 
-IS_LOCAL = True  # 在本機測試設為 True，搬到 AWS 設為 False
+IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
 
 # --- 伺服器端 Session 儲存目錄設定 ---
 session_dir = os.path.join(os.getcwd(), 'flask_session')
@@ -269,7 +269,7 @@ DASHBOARD_CONTENT = """
                     <input type="number" id="report_amount" class="form-control">
                 </div>
                 <div class="mb-3">
-                    <label class="small fw-bold text-muted">Your Account Last 5 Digits</label>
+                    <label class="small fw-bold text-muted">Your ATM Account Last 5 Digits</label>
                     <input type="text" id="report_five" class="form-control" placeholder="e.g. 12345" maxlength="5">
                     <div class="form-text text-muted" style="font-size: 0.7rem;">
                         * For Cash Deposit, please enter <span class="fw-bold text-primary">00000</span>.
