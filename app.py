@@ -740,7 +740,19 @@ def payment_callback_proxy():
         
         # PHP 那邊會回傳 "1|OK" 或 "0|BarcodeNotFound" 等字串
         if php_response.status_code == 200:
-            return php_response.text
+            if "1|OK" in php_response.text:
+                # 只有 PHP 成功銷帳，才回覆 SmilePay 規定的 XML 標籤
+                xml_success = "<Roturlstatus>OK</Roturlstatus>"
+                
+                from flask import make_response
+                resp = make_response(xml_success)
+                resp.headers['Content-Type'] = 'text/html'
+                return resp
+            else:
+                # 如果 PHP 回傳的是 0|Error 或其他訊息
+                print(f"PHP Logic Error: {php_response.text}")
+                return f"PHP processing failed: {php_response.text}", 200 
+                # 注意：這裡回傳 200 但內容不是標籤，SmilePay 就會視為失敗並補傳
         else:
             # 如果 PHP 噴錯 (500 等)，回報給 Python Log
             print(f"PHP API Error: {php_response.status_code} - {php_response.text}")
