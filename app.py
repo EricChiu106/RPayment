@@ -742,8 +742,7 @@ def payment_callback_proxy():
         if php_response.status_code == 200:
             if "1|OK" in php_response.text:
                 # 只有 PHP 成功銷帳，才回覆 SmilePay 規定的 XML 標籤
-                xml_success = "<Roturlstatus>OK</Roturlstatus>"
-                
+                xml_success = "<Roturlstatus>SmilePay_OK</Roturlstatus>"                
                 from flask import make_response
                 resp = make_response(xml_success)
                 resp.headers['Content-Type'] = 'text/html'
