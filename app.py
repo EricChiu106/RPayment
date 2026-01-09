@@ -167,10 +167,17 @@ DASHBOARD_CONTENT = """
                                         {% endif %}
                                     {% endif %}
                                         {% if s.has_report %}
-                                            <button class="btn btn-sm btn-light text-info border w-100 shadow-sm fw-bold" 
-                                                    style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;" disabled>
-                                                <i class="fas fa-history me-1"></i> Verifying
-                                            </button>
+                                      <button class="btn btn-sm btn-outline-primary w-100 shadow-sm fw-bold" 
+                                            style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;"
+                                            onclick="viewSubmittedInfo('{{ order.order_no }}', '{{ s.amount }}', '{{ s.last_five if s.last_five else '' }}')">
+                                        <i class="fas fa-info-circle me-1"></i> View Info
+                                    </button>
+                                                <div class="text-center mt-1">
+                                                <a href="javascript:void(0)" class="text-muted small text-decoration-underline" 
+                                                   onclick="cancelReport('{{ s.id }}')" style="font-size: 0.65rem;">
+                                                   Cancel
+                                                </a>
+                                            </div>
                                             <div class="text-danger mt-1 fw-bold" style="font-size: 0.62rem; letter-spacing: -0.2px;">
                                                    <i class="fas fa-exclamation-circle me-1"></i>Verification: 5-7 working days
                                             </div>
@@ -282,135 +289,107 @@ DASHBOARD_CONTENT = """
         </div>
     </div>
 </div>
-
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // 1. 處理點擊 Transfer 按鈕 (委託模式，最穩定)
-    const appContainer = document.getElementById('reconcile-app');
-    appContainer.addEventListener('click', function(e) {
-        const btn = e.target.closest('.btn-trigger-transfer');
-        if (btn) {
-            const orderNo = btn.getAttribute('data-order');
-            const sid = btn.getAttribute('data-sid');
-            const amt = btn.getAttribute('data-amount');
 
-            document.getElementById('report_order_no').value = orderNo;
-            document.getElementById('report_sid').value = sid;
-            document.getElementById('report_amount').value = amt;
-            document.getElementById('report_five').value = '';
-            console.log("Setting Modal Data:", orderNo);
-        }
-    });
+function viewSubmittedInfo(orderNo, amount, lastFive) {
+    // 檢查資料是否有效
+    var lastDigits = (lastFive && lastFive !== 'None') ? lastFive : "Not provided";
+    var displayAcc = lastDigits === "00000" ? "00000 (Cash Deposit)" : lastDigits;
     
+    var infoMsg = 
+        "Payment Info:\\n" + 
+        "----------------------------\\n" + 
+        "Order No: " + orderNo + "\\n" + 
+        "Amount Paid: $" + Number(amount).toLocaleString() + "\\n" + 
+        "Your Account Last 5 Digits: " + displayAcc + "\\n" + 
+        "----------------------------\\n" + 
+
+    alert(infoMsg);
+}
 
 
+function cancelReport(id) {
+    if (!confirm("Are you sure you want to cancel?")) return;
+    fetch('/cancel_transfer', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({schedule_id: id})
+    }).then(function(res) {
+        if (res.ok) {
+            alert("Cancelled!");
+            location.reload();
+        } else {
+            alert("Failed to cancel.");
+        }
+    }).catch(function(err) {
+        alert("Error: " + err);
+    });
+}
 
-    // 2. 處理 Submit 按鈕 (EventListener 模式)
-    const submitBtn = document.getElementById('btn-submit-payment');
-    if (submitBtn) {
-        submitBtn.addEventListener('click', function() {
-            const data = {
+function updatePassword() {
+    var p1 = document.getElementById('new_pw').value;
+    var p2 = document.getElementById('confirm_pw').value;
+    if (!p1 || p1.length < 6) return alert("Min 6 characters");
+    if (p1 !== p2) return alert("Passwords mismatch");
+    fetch('/update_password', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({password: p1})
+    }).then(function(res) {
+        if (res.ok) { alert("Success!"); location.reload(); }
+        else { alert("Failed"); }
+    });
+}
+
+function copyAccountNumber() {
+    var acc = document.getElementById('bank-account-num').innerText;
+    navigator.clipboard.writeText(acc).then(function() {
+        document.getElementById('copy-icon').style.display = 'none';
+        document.getElementById('copy-text').style.display = 'inline';
+        setTimeout(function() {
+            document.getElementById('copy-icon').style.display = 'inline';
+            document.getElementById('copy-text').style.display = 'none';
+        }, 1500);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    var app = document.getElementById('reconcile-app');
+    if (app) {
+        app.addEventListener('click', function(e) {
+            var btn = e.target.closest('.btn-trigger-transfer');
+            if (btn) {
+                document.getElementById('report_order_no').value = btn.getAttribute('data-order');
+                document.getElementById('report_sid').value = btn.getAttribute('data-sid');
+                document.getElementById('report_amount').value = btn.getAttribute('data-amount');
+                document.getElementById('report_five').value = '';
+            }
+        });
+    }
+    var subBtn = document.getElementById('btn-submit-payment');
+    if (subBtn) {
+        subBtn.addEventListener('click', function() {
+            var d = {
                 schedule_id: document.getElementById('report_sid').value,
                 order_no: document.getElementById('report_order_no').value,
                 amount: document.getElementById('report_amount').value,
                 last_five: document.getElementById('report_five').value
             };
-
-            if (!data.amount || data.amount <= 0) return alert("Please enter a valid amount.");
-            if (!data.last_five || data.last_five.length !== 5) return alert("Please enter 5 digits. (00000 for Cash)");
-
-            const displayAcc = data.last_five === "00000" ? "00000 (Cash Deposit)" : data.last_five;
-            const confirmMsg = `OrderNo: ${data.order_no}\nAmount: $${Number(data.amount).toLocaleString()}\nLast_five: ${displayAcc}\n\nConfirm Submission?`;
-
-            if (!confirm(confirmMsg)) return;
-
+            if (!d.amount || d.last_five.length !== 5) return alert("Check amount or last 5 digits");
             fetch('/submit_transfer', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            }).then(res => {
-                if (res.ok) {
-                    alert("Success! Verification takes 5-7 working days.");
-                    location.reload();
-                } else {
-                    alert("Submission Failed.");
-                }
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(d)
+            }).then(function(res) {
+                if (res.ok) { alert("Success!"); location.reload(); }
+                else { alert("Failed"); }
             });
         });
     }
 });
-
-  
-      function updatePassword() {
-        const newPw = document.getElementById('new_pw').value;
-        const confirmPw = document.getElementById('confirm_pw').value;
-
-        // 1. 基本檢查：是否為空
-        if (!newPw) {
-            alert("Please enter a new password.");
-            return;
-        }
-
-        // 2. 長度檢查 (對應您 HTML 的 placeholder: Min 6 characters)
-        if (newPw.length < 6) {
-            alert("Password must be at least 6 characters.");
-            return;
-        }
-
-        // 3. 關鍵比對：檢查兩次輸入是否一致
-        if (newPw !== confirmPw) {
-            alert("Passwords do not match. Please type again.");
-            return;
-        }
-
-        // 4. 正式送出
-        fetch('/update_password', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: newPw })
-        }).then(res => {
-            if (res.ok) { 
-                alert("Password updated successfully!"); 
-                location.reload(); 
-            } else { 
-                alert("Update failed. Please try again."); 
-            }
-        }).catch(err => {
-            alert("Network error.");
-        });
-    }
-    
-    
-function copyAccountNumber() {
-    const accountNum = document.getElementById('bank-account-num').innerText;
-    const copyIcon = document.getElementById('copy-icon');
-    const copyText = document.getElementById('copy-text');
-
-    // 執行複製
-    navigator.clipboard.writeText(accountNum).then(() => {
-        // 視覺回饋：隱藏圖示，顯示 "Copied!" 文字
-        copyIcon.style.display = 'none';
-        copyText.style.display = 'inline';
-
-        // 1.5 秒後恢復原狀
-        setTimeout(() => {
-            copyIcon.style.display = 'inline';
-            copyText.style.display = 'none';
-        }, 1500);
-    }).catch(err => {
-        // 備用方案 (針對舊版瀏覽器)
-        const el = document.createElement('textarea');
-        el.value = accountNum;
-        document.body.appendChild(el);
-        el.select();
-        document.execCommand('copy');
-        document.body.removeChild(el);
-        alert("Account copied!");
-    });
-}
-
 </script>
 """
+
 
 BARCODE_PAGE = """
 <div class="container py-2">
@@ -594,6 +573,7 @@ def dashboard():
         now = datetime.now()
         for order in orders:
             for s in order.get('payment_schedule', []):
+                s['last_five'] = s.get('last_five', '')
                 # 1. 檢查是否已經有條碼資料 (排除空值、None 或字串 '0')
                 has_existing_code = bool(s.get('barcode_1') and s.get('barcode_1') != '0') or \
                                     bool(s.get('has_barcode') and s.get('has_barcode') != '0')
@@ -757,6 +737,35 @@ def payment_callback_proxy():
         print(f"Proxy Critical Error: {str(e)}")
         return "Internal Proxy Error", 500
         
+@app.route('/cancel_transfer', methods=['POST'])
+def cancel_transfer():
+    data = request.json
+    schedule_id = data.get('schedule_id')
+
+    if not schedule_id:
+        return jsonify({"status": "error", "message": "Missing schedule ID"}), 400
+
+    try:
+        # 呼叫 PHP API 進行取消 (請確認 PHP 端有對應此功能的 URL)
+        response = requests.post(
+            f"{PHP_API_URL}/cancel-transfer-report", 
+            json={"order_payment_id": int(schedule_id)},
+            headers={"Authorization": f"Bearer {session.get('token')}"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            return jsonify({"status": "success"})
+        else:
+            try:
+                result = response.json()
+            except:
+                result = {"message": response.text}
+            return jsonify({"status": "error", "message": result.get('message', 'PHP Server Error')}), response.status_code
+            
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
  
 @app.route('/submit_transfer', methods=['POST'])
 def submit_transfer():
