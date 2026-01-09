@@ -302,7 +302,7 @@ function viewSubmittedInfo(orderNo, amount, lastFive) {
         "Order No: " + orderNo + "\\n" + 
         "Amount Paid: $" + Number(amount).toLocaleString() + "\\n" + 
         "Your Account Last 5 Digits: " + displayAcc + "\\n" + 
-        "----------------------------\\n" + 
+        "----------------------------\\n"
 
     alert(infoMsg);
 }
