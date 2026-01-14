@@ -686,12 +686,29 @@ def get_barcode(payment_id):
                     b['amount'] = int(b['barcode_3'][-5:])
                 except: 
                     b['amount'] = 0
-                
+                    
                 # 渲染你剛才設定好的全英文 BARCODE_PAGE
                 return render_page(BARCODE_PAGE, b=b)
+        error_msg = data.get('message', 'Unknown Error')
         
-        return f"Error: {data.get('message', 'Unknown Error')}"
-    
+        # 針對額度已滿 (trading control fail) 的友善提示
+        if "trading control fail" in error_msg.lower():
+                    return render_page("""
+                        <div class="container text-center pt-4">
+                            <h3 class="fw-bold">Payment Notice</h3>
+                            <p class="mt-3">Barcode system is temporarily full.</p>                         
+                            <div class="alert alert-info py-3 my-4">
+                                <strong>Try these instead:</strong><br>
+                                1. Bank Transfer<br>
+                                2. <b>Pay In-Store</b> (Cash)<br>
+                                3. <b>Try again</b> in 2-3 days
+                            </div>
+                            <a href="/dashboard" class="btn btn-primary btn-lg w-100 py-3 shadow">Back to Dashboard</a>
+                        </div>
+                    """)
+                    
+        return f"Error: {error_msg}"
+       
     except Exception as e: 
         print(f"Get Barcode Critical Error: {e}") 
         return "System Error"
