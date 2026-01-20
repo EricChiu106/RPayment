@@ -7,8 +7,12 @@ from flask_session import Session # 伺服器端執行: pip install flask-sessio
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import time
+from werkzeug.utils import secure_filename
+
+
 
 app = Flask(__name__)
+
 
 
 
@@ -23,6 +27,8 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
+ALLOWED_EXTENSIONS = {'png','jpg','jpeg','gif'}
+UPLOAD_FOLDER = 'static/uploads'
 
 IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
 
@@ -53,6 +59,10 @@ app.config.update(
 )
 Session(app)
 
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.',1)[1].lower() in ALLOWED_EXTENSIONS
+    
+    
 def render_page(template_body, **kwargs):
     html_layout = f"""
     <!DOCTYPE html>
@@ -169,7 +179,7 @@ DASHBOARD_CONTENT = """
                                         {% if s.has_report %}
                                       <button class="btn btn-sm btn-outline-primary w-100 shadow-sm fw-bold" 
                                             style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;"
-                                            onclick="viewSubmittedInfo('{{ order.order_no }}', '{{ s.amount }}', '{{ s.last_five if s.last_five else '' }}')">
+                                            onclick="viewSubmittedInfo('{{ order.order_no }}', '{{ s.amount }}', '{{ s.last_five if s.last_five else '' }}','{{ s.receipt_url }}')">
                                         <i class="fas fa-info-circle me-1"></i> View Info
                                     </button>
                                                 <div class="text-center mt-1">
@@ -209,7 +219,13 @@ DASHBOARD_CONTENT = """
             </div>
 
             <div class="mt-3 pt-2 border-top d-flex justify-content-between align-items-center">
-                <small class="text-muted">Balance: <span class="text-danger fw-bold">${{ "{:,.0f}".format(order.balance) }}</span></small>
+                <small class="text-muted">               
+                    {% if order.balance <= 0 %}
+                        <span class="text-success fw-bold"><i class="fas fa-check-double me-1"></i>Finished</span>
+                    {% else %}
+                         Balance: <span class="text-danger fw-bold">${{ "{:,.0f}".format(order.balance) }}</span>
+                    {% endif %}
+                </small>
                 <small class="text-muted" style="font-size: 0.7rem;">Term: {{ order.period }}</small>
             </div>
         </div>
@@ -261,9 +277,12 @@ DASHBOARD_CONTENT = """
                             <i class="fas fa-copy" id="copy-icon"></i>
                             <span id="copy-text" style="font-size: 0.65rem; display: none;" class="text-success fw-bold">Copied!</span>
                         </button>     
-                                <div class="mt-2 mb-2 fw-bold" style="color: #dc3545; font-size: 0.75rem; line-height: 1.4;">
-                            <i class="fas fa-check-circle me-1"></i>Done transfer? Please SUBMIT the form below & send receipt to LINE.
-                        </div>                        
+                          <div class="mt-2 mb-2 fw-bold" style="color: #0d6efd; font-size: 0.75rem; line-height: 1.4;">
+                            <i class="fas fa-camera me-1"></i>Done transfer? Please upload your receipt below.
+                            <div class="fw-normal text-muted" style="font-size: 0.65rem; margin-top: 2px;">
+                                (Not required for Barcode payments; it's verified automatically.)
+                            </div>
+                        </div>     
                     </div> 
                 </div>
                 <input type="hidden" id="report_sid">
@@ -282,30 +301,78 @@ DASHBOARD_CONTENT = """
                         * For Cash Deposit, please enter <span class="fw-bold text-primary">00000</span>.
                     </div>
                 </div>
+              <div class="mb-3">
+                <label class="small fw-bold text-danger mb-1 d-block">
+                    <i class="fas fa-camera me-1"></i>After transferring, please upload your receipt.
+                </label>
+                <div class="custom-file-upload">
+                    <input type="file" id="receipt_img" class="d-none" accept="image/*" 
+                           onchange="document.getElementById('file-status').innerText = 'Selected: ' + this.files[0].name">
+                    
+                    <label for="receipt_img" class="btn btn-outline-primary w-100 py-2 d-flex align-items-center justify-content-center" style="border-style: dashed;">
+                        <i class="fas fa-cloud-upload-alt me-2"></i>Choose Receipt Image
+                    </label>
+                    
+                    <div id="file-status" class="form-text text-muted text-center mt-1" style="font-size: 0.7rem;">
+                        No file chosen
+                    </div>
+                </div>
+            </div>
+
             </div>
             <div class="modal-footer border-0">
-                <button type="button" class="btn btn-primary w-100 py-3 fw-bold" id="btn-submit-payment" style="border-radius: 12px;">Submit Report</button>
+                <button type="button" class="btn btn-primary w-100 py-3 fw-bold" id="btn-submit-payment" style="border-radius: 12px;">Submit</button>
             </div>
         </div>
-    </div>
+    </div>   
 </div>
-<script>
+<div class="modal fade" id="receiptModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content" style="border-radius: 20px;">
+      <div class="modal-header border-0">
+        <h5 class="modal-title fw-bold">Payment Info</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p id="modalInfo"></p>
+        <img id="modalImg" src="" alt="Receipt Image" style="max-width: 320px; max-height: 400px; width: auto; height: auto; display:none; margin: 0 auto;" />
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 
-function viewSubmittedInfo(orderNo, amount, lastFive) {
-    // 檢查資料是否有效
+
+<script>
+window.viewSubmittedInfo = function(orderNo, amount, lastFive, imgUrl = null) {
+
     var lastDigits = (lastFive && lastFive !== 'None') ? lastFive : "Not provided";
     var displayAcc = lastDigits === "00000" ? "00000 (Cash Deposit)" : lastDigits;
-    
-    var infoMsg = 
-        "Payment Info:\\n" + 
-        "----------------------------\\n" + 
-        "Order No: " + orderNo + "\\n" + 
-        "Amount Paid: $" + Number(amount).toLocaleString() + "\\n" + 
-        "Your Account Last 5 Digits: " + displayAcc + "\\n" + 
-        "----------------------------\\n"
+    var infoMsg = `----------------------------
+Order No: ${orderNo}
+Amount Paid: $${Number(amount).toLocaleString()}
+Your Account Last 5 Digits: ${displayAcc}
+----------------------------
+`;
 
-    alert(infoMsg);
+    document.getElementById('modalInfo').innerText = infoMsg;
+
+    if (imgUrl) {
+        document.getElementById('modalImg').src = imgUrl;
+        document.getElementById('modalImg').style.display = 'block';
+    } else {
+        document.getElementById('modalImg').style.display = 'none';
+    }
+
+    var modal = new bootstrap.Modal(document.getElementById('receiptModal'));
+    modal.show();
 }
+
+
+
+
 
 
 function cancelReport(id) {
@@ -366,27 +433,42 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
     var subBtn = document.getElementById('btn-submit-payment');
     if (subBtn) {
         subBtn.addEventListener('click', function() {
-            var d = {
-                schedule_id: document.getElementById('report_sid').value,
-                order_no: document.getElementById('report_order_no').value,
-                amount: document.getElementById('report_amount').value,
-                last_five: document.getElementById('report_five').value
-            };
-            if (!d.amount || d.last_five.length !== 5) return alert("Check amount or last 5 digits");
+            var schedule_id = document.getElementById('report_sid').value;
+            var order_no = document.getElementById('report_order_no').value;
+            var amount = document.getElementById('report_amount').value;
+            var last_five = document.getElementById('report_five').value;
+
+            if (!amount || last_five.length !== 5) return alert("Check amount or last 5 digits");
+
+            var fileInput = document.getElementById('receipt_img');
+            var file = fileInput.files[0];
+
+            var fd = new FormData();
+            fd.append('schedule_id', schedule_id);
+            fd.append('order_no', order_no);
+            fd.append('amount', amount);
+            fd.append('last_five', last_five);
+            if (file) fd.append('receipt_img', file);
+
             fetch('/submit_transfer', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(d)
+                body: fd
             }).then(function(res) {
-                if (res.ok) { alert("Success!"); location.reload(); }
-                else { alert("Failed"); }
+                if (res.ok) {
+                    alert("Success!");
+                    location.reload();
+                } else {
+                    alert("Failed");
+                }
             });
         });
     }
 });
+
 </script>
 """
 
@@ -786,46 +868,61 @@ def cancel_transfer():
  
 @app.route('/submit_transfer', methods=['POST'])
 def submit_transfer():
-    data = request.json
-    
-    # 確保資料格式正確
+    # 1. 讀 form
+    schedule_id = request.form.get('schedule_id')
+    order_no = request.form.get('order_no')
+    amount = request.form.get('amount')
+    last_five = request.form.get('last_five')
+
     try:
         payload = {
-            "order_payment_id": int(data.get('schedule_id')), # 轉為整數
-            "order_no": str(data.get('order_no')),
-            "amount": float(data.get('amount')),           # 轉為浮點數
-            "last_five": str(data.get('last_five'))
+            "order_payment_id": int(schedule_id),
+            "order_no": str(order_no),
+            "amount": float(amount),
+            "last_five": str(last_five)
         }
-    except (TypeError, ValueError) as e:
+    except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Invalid data format"}), 400
-    
+
+    # 2. 讀圖片
+    receipt_file = request.files.get('receipt_img')
+    if receipt_file:
+        if not allowed_file(receipt_file.filename):
+            return jsonify({"status": "error", "message": "Invalid image type"}), 400
+
+        filename = secure_filename(receipt_file.filename)
+        filename = f"{order_no}_{schedule_id}_{int(time.time())}_{filename}"
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        save_path = os.path.join(UPLOAD_FOLDER, filename)
+        receipt_file.save(save_path)
+
+        # 加到 payload 裡 (如果 PHP API 需要)
+        # 你可以改成傳送 file
+        files = {'receipt_img': open(save_path, 'rb')}
+    else:
+        files = None
+
+    # 3. 傳到 PHP API
     try:
         response = requests.post(
-            f"{PHP_API_URL}/save-transfer-report", 
-            json=payload,
+            f"{PHP_API_URL}/save-transfer-report",
+            data=payload,
+            files=files,
             headers={"Authorization": f"Bearer {session.get('token')}"},
-            timeout=10 # 稍微增加超時時間，避免對帳查詢較久
+            timeout=10
         )
-        
-        # 嘗試解析 JSON，若失敗則回傳原始錯誤文字
-        try:
-            result = response.json()
-        except:
-            result = {"message": response.text}
+        result = response.json() if response.text else {"message": "No response"}
 
         if response.status_code == 200:
             return jsonify({"status": "success"})
         else:
-            # 回傳 PHP 的具體報錯 (例如: 422 驗證失敗)
-            return jsonify({
-                "status": "error", 
-                "message": result.get('message', 'PHP Server Error')
-            }), response.status_code
-            
+            return jsonify({"status": "error", "message": result.get('message', 'PHP Server Error')}), response.status_code
+
     except requests.exceptions.Timeout:
         return jsonify({"status": "error", "message": "Connection timeout"}), 504
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+        
         
         
     
