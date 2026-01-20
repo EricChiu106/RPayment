@@ -125,16 +125,14 @@ DASHBOARD_CONTENT = r"""
                 <small class="text-muted d-block" style="font-size: 0.7rem;">Items:</small>
                 <div class="fw-bold small">{{ order.items_text }}</div>
             </div>
-
-            <div class="fw-bold mb-2 text-primary small"><i class="fas fa-list-ol me-1"></i> Payment Schedule</div>
-            
+                
             <div class="table-responsive">
                 <table class="table table-sm align-middle">
                     <thead class="bg-light">
                         <tr class="small text-muted" style="font-size: 0.7rem;">
                             <th class="ps-2">Due Date</th>
                             <th>Amount</th>
-                            <th class="text-end pe-2">Action / Status</th>
+                            <th class="text-end pe-2">Status</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -366,7 +364,6 @@ document.getElementById('receipt_img').addEventListener('change', async function
         subBtn.disabled = true;
         subBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>處理照片中...';
     }
-    statusText.innerText = "正在優化圖片尺寸...";
 
     let workingBlob = file;
 
@@ -431,7 +428,6 @@ document.getElementById('receipt_img').addEventListener('change', async function
                 
                 // 顯示壓縮後的資訊供確認
                 const fileSizeMB = (finalBlob.size / 1024 / 1024).toFixed(2);
-                statusText.innerText = '圖片已優化: ' + fileSizeMB + ' MB';
                 console.log("Image optimized for upload:", finalFileToUpload);
             }, 'image/jpeg', 0.7); // 0.7 是品質壓縮比
         };
