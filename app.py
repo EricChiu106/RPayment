@@ -313,10 +313,18 @@ DASHBOARD_CONTENT = r"""
                         <i class="fas fa-cloud-upload-alt me-2"></i>Choose Receipt Image
                     </label>
                     
+                    <div id="preview-wrapper" class="d-none mt-2 text-center">
+                        <img id="receipt-preview" src="" alt="Preview" class="img-thumbnail" style="max-height: 150px; border-radius: 8px;">
+                    </div>
+                    
+                    
+                    
                     <div id="file-status" class="form-text text-muted text-center mt-1" style="font-size: 0.7rem;">
                         No file chosen
                     </div>
-                </div>
+                </div>   
+
+                
             </div>
 
             </div>
@@ -343,31 +351,61 @@ DASHBOARD_CONTENT = r"""
     </div>
   </div>
 </div>
-
-
-
-
-<script src="https://cdn.jsdelivr.net/npm/heic2any@0.6.0/heic2any.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <script>
-document.getElementById('receipt_img').addEventListener('change', async function(e){
+let finalFileToUpload = null;
+
+document.getElementById('receipt_img').addEventListener('change', async function(e) {
     const file = e.target.files[0];
-    if(!file) return;
+    if (!file) return;
 
-    if(file.type === "image/heic" || file.name.endsWith(".HEIC") || file.name.endsWith(".heic")) {
-        const convertedBlob = await heic2any({
-            blob: file,
-            toType: "image/jpeg",
-            quality: 0.8
-        });
+    const subBtn = document.getElementById('btn-submit-payment');
+    const statusText = document.getElementById('file-status');
+    const previewWrapper = document.getElementById('preview-wrapper');
+    const previewImg = document.getElementById('receipt-preview');
 
-        const jpgFile = new File([convertedBlob], file.name.replace(/\.heic$/i, ".jpg"), {
-            type: "image/jpeg"
-        });
-
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(jpgFile);
-        e.target.files = dataTransfer.files;
+    // 1. 鎖定按鈕並提示
+    if (subBtn) {
+        subBtn.disabled = true;
+        subBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Processing...';
     }
+    statusText.innerText = "Processing image...";
+
+    finalFileToUpload = file;
+
+    // 2. 判斷是否需要轉檔 (HEIC)
+    if (file.type === "image/heic" || /\.heic$/i.test(file.name)) {
+        try {
+            let blob = await heic2any({
+                blob: file,
+                toType: "image/jpeg",
+                quality: 0.7
+            });
+            if (Array.isArray(blob)) blob = blob[0];
+            
+            finalFileToUpload = new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", {
+                type: "image/jpeg"
+            });
+        } catch (err) {
+            console.error("Conversion Error:", err);
+            statusText.innerText = "Error processing image.";
+        }
+    }
+
+    // 3. 產生縮圖預覽
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        previewImg.src = event.target.result;
+        previewWrapper.classList.remove('d-none'); // 顯示圖片
+    };
+    reader.readAsDataURL(finalFileToUpload);
+
+    // 4. 完成處理，恢復按鈕
+    if (subBtn) {
+        subBtn.disabled = false;
+        subBtn.innerHTML = 'Submit';
+    }
+    statusText.innerText = 'Selected: ' + finalFileToUpload.name;
 });
 
 window.viewSubmittedInfo = function(orderNo, amount, lastFive, imgUrl = null) {
@@ -459,38 +497,49 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     var subBtn = document.getElementById('btn-submit-payment');
-    if (subBtn) {
-        subBtn.addEventListener('click', function() {
-            var schedule_id = document.getElementById('report_sid').value;
-            var order_no = document.getElementById('report_order_no').value;
-            var amount = document.getElementById('report_amount').value;
-            var last_five = document.getElementById('report_five').value;
 
-            if (!amount || last_five.length !== 5) return alert("Check amount or last 5 digits");
+if (subBtn) {
+    subBtn.addEventListener('click', function() {
+        var schedule_id = document.getElementById('report_sid').value;
+        var order_no = document.getElementById('report_order_no').value;
+        var amount = document.getElementById('report_amount').value;
+        var last_five = document.getElementById('report_five').value;
 
-            var fileInput = document.getElementById('receipt_img');
-            var file = fileInput.files[0];
+        if (!amount || last_five.length !== 5) return alert("Check amount or last 5 digits");
 
-            var fd = new FormData();
-            fd.append('schedule_id', schedule_id);
-            fd.append('order_no', order_no);
-            fd.append('amount', amount);
-            fd.append('last_five', last_five);
-            if (file) fd.append('receipt_img', file);
+        var fd = new FormData();
+        fd.append('schedule_id', schedule_id);
+        fd.append('order_no', order_no);
+        fd.append('amount', amount);
+        fd.append('last_five', last_five);
 
-            fetch('/submit_transfer', {
-                method: 'POST',
-                body: fd
-            }).then(function(res) {
-                if (res.ok) {
-                    alert("Success!");
-                    location.reload();
-                } else {
-                    alert("Failed");
-                }
-            });
+        // 【關鍵修改】優先使用我們轉好的 finalFileToUpload
+        // 如果沒有（例如沒選照片），則嘗試從 input 抓
+        var fileToUse = finalFileToUpload || document.getElementById('receipt_img').files[0];
+        
+        if (fileToUse) {
+            fd.append('receipt_img', fileToUse);
+        }
+
+        fetch('/submit_transfer', {
+            method: 'POST',
+            body: fd
+        }).then(function(res) {
+            if (res.ok) {
+                alert("Success!");
+                location.reload();
+            } else {
+                // 如果失敗，看看後端回傳什麼
+                res.json().then(data => {
+                    alert("Failed: " + (data.message || "Unknown error"));
+                });
+            }
+        }).catch(err => {
+            console.error("Fetch error:", err);
+            alert("Network error, please try again.");
         });
-    }
+    });
+}
 });
 
 </script>

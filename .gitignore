@@ -6,6 +6,8 @@ __pycache__/
 *.pyc
 
 # 排除虛擬環境
+node_modules/
+.DS_Store
 venv/
 .env
 static/uploads/*
