@@ -9,12 +9,9 @@ from flask_limiter.util import get_remote_address
 import time
 from werkzeug.utils import secure_filename
 
-
-
 app = Flask(__name__)
 
-
-
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 提升到 16MB
 
 # 讓 Flask 正確識別 HTTPS 代理，解決手機 Safari Cookie 信任問題
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
@@ -364,48 +361,82 @@ document.getElementById('receipt_img').addEventListener('change', async function
     const previewWrapper = document.getElementById('preview-wrapper');
     const previewImg = document.getElementById('receipt-preview');
 
-    // 1. 鎖定按鈕並提示
+    // 1. 進入處理狀態：鎖定按鈕
     if (subBtn) {
         subBtn.disabled = true;
-        subBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Processing...';
+        subBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>處理照片中...';
     }
-    statusText.innerText = "Processing image...";
+    statusText.innerText = "正在優化圖片尺寸...";
 
-    finalFileToUpload = file;
+    let workingBlob = file;
 
-    // 2. 判斷是否需要轉檔 (HEIC)
+    // 2. 如果是 iPhone HEIC 格式，先轉成標準 Blob
     if (file.type === "image/heic" || /\.heic$/i.test(file.name)) {
         try {
-            let blob = await heic2any({
+            console.log("Detecting HEIC, converting...");
+            workingBlob = await heic2any({
                 blob: file,
                 toType: "image/jpeg",
-                quality: 0.7
+                quality: 0.8
             });
-            if (Array.isArray(blob)) blob = blob[0];
-            
-            finalFileToUpload = new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", {
-                type: "image/jpeg"
-            });
+            if (Array.isArray(workingBlob)) workingBlob = workingBlob[0];
         } catch (err) {
-            console.error("Conversion Error:", err);
-            statusText.innerText = "Error processing image.";
+            console.error("HEIC Conversion Error:", err);
         }
     }
 
-    // 3. 產生縮圖預覽
+    // 3. 使用 Canvas 進行尺寸壓縮 (Resize)
+    const img = new Image();
     const reader = new FileReader();
-    reader.onload = function(event) {
-        previewImg.src = event.target.result;
-        previewWrapper.classList.remove('d-none'); // 顯示圖片
-    };
-    reader.readAsDataURL(finalFileToUpload);
 
-    // 4. 完成處理，恢復按鈕
-    if (subBtn) {
-        subBtn.disabled = false;
-        subBtn.innerHTML = 'Submit';
-    }
-    statusText.innerText = 'Selected: ' + finalFileToUpload.name;
+    reader.onload = function(event) {
+        img.src = event.target.result;
+        img.onload = function() {
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+
+            // 限制最大邊長為 1280 像素，這能讓 5MB 照片變成 500KB 左右
+            const MAX_WIDTH_HEIGHT = 1280;
+            if (width > height) {
+                if (width > MAX_WIDTH_HEIGHT) {
+                    height *= MAX_WIDTH_HEIGHT / width;
+                    width = MAX_WIDTH_HEIGHT;
+                }
+            } else {
+                if (height > MAX_WIDTH_HEIGHT) {
+                    width *= MAX_WIDTH_HEIGHT / height;
+                    height = MAX_WIDTH_HEIGHT;
+                }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+
+            // 轉成最終要上傳的 JPG Blob
+            canvas.toBlob(function(finalBlob) {
+                // 封裝成新的 File 物件供上傳
+                finalFileToUpload = new File([finalBlob], "receipt.jpg", { type: "image/jpeg" });
+
+                // 4. 更新預覽圖與 UI
+                previewImg.src = canvas.toDataURL('image/jpeg');
+                previewWrapper.classList.remove('d-none');
+
+                if (subBtn) {
+                    subBtn.disabled = false;
+                    subBtn.innerHTML = 'Submit';
+                }
+                
+                // 顯示壓縮後的資訊供確認
+                const fileSizeMB = (finalBlob.size / 1024 / 1024).toFixed(2);
+                statusText.innerText = '圖片已優化: ' + fileSizeMB + ' MB';
+                console.log("Image optimized for upload:", finalFileToUpload);
+            }, 'image/jpeg', 0.7); // 0.7 是品質壓縮比
+        };
+    };
+    reader.readAsDataURL(workingBlob);
 });
 
 window.viewSubmittedInfo = function(orderNo, amount, lastFive, imgUrl = null) {
