@@ -8,3 +8,5 @@ __pycache__/
 # 排除虛擬環境
 venv/
 .env
+static/uploads/*
+!static/uploads/.gitkeep
