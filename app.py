@@ -93,7 +93,7 @@ def render_page(template_body, **kwargs):
     return render_template_string(html_layout.replace("{{ template_body | safe }}", template_body), **kwargs)
 
 
-DASHBOARD_CONTENT = """
+DASHBOARD_CONTENT = r"""
 <div class="container py-2" id="reconcile-app">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="fw-bold m-0">Hi, {{ session.get('name', 'Member') }}</h4>
@@ -345,7 +345,31 @@ DASHBOARD_CONTENT = """
 </div>
 
 
+
+
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.6.0/heic2any.min.js"></script>
 <script>
+document.getElementById('receipt_img').addEventListener('change', async function(e){
+    const file = e.target.files[0];
+    if(!file) return;
+
+    if(file.type === "image/heic" || file.name.endsWith(".HEIC") || file.name.endsWith(".heic")) {
+        const convertedBlob = await heic2any({
+            blob: file,
+            toType: "image/jpeg",
+            quality: 0.8
+        });
+
+        const jpgFile = new File([convertedBlob], file.name.replace(/\.heic$/i, ".jpg"), {
+            type: "image/jpeg"
+        });
+
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(jpgFile);
+        e.target.files = dataTransfer.files;
+    }
+});
+
 window.viewSubmittedInfo = function(orderNo, amount, lastFive, imgUrl = null) {
 
     var lastDigits = (lastFive && lastFive !== 'None') ? lastFive : "Not provided";
