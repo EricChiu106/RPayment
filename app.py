@@ -1,5 +1,5 @@
 import os                          
-from flask import Flask, render_template_string, request, redirect, url_for, session, jsonify
+from flask import Flask, render_template_string, request, redirect, url_for, session, jsonify, Response
 import requests
 from datetime import datetime,  timedelta
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -8,6 +8,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import time
 from werkzeug.utils import secure_filename
+import json
 
 app = Flask(__name__)
 
@@ -612,7 +613,7 @@ BARCODE_PAGE = """
     </div>
     <div class="card mb-3 border-0 shadow-sm" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px;">
         <div class="card-body text-center text-white py-3">
-            <div class="small opacity-75">Total Amount Due</div>
+            <div class="small opacity-75">Total Amount</div>
             <div class="fs-2 fw-bold">${{ "{:,.0f}".format(b.amount | float) }}</div>
         </div>
     </div>
@@ -792,13 +793,15 @@ def dashboard():
 
 
 
+
+
 @app.route('/get_barcode/<payment_id>')
 def get_barcode(payment_id):
     if not session.get('acc') or not session.get('pw'):
         return redirect(url_for('login'))
     
     try:
-        # --- 1. 從 Session 找這筆資料做初步日期攔截 ---
+        # --- 1. 從 Session 找這筆資料做日期攔截 ---
         orders = session.get('orders', [])
         payment_info = None
         for order in orders:
@@ -808,132 +811,137 @@ def get_barcode(payment_id):
                     break
             if payment_info: break
 
-        # 攔截：如果時間還沒到 20 天開放期，直接擋掉
+        # 20天開放期攔截邏輯
         if payment_info and payment_info.get('date'):
             try:
                 due_date = datetime.strptime(payment_info['date'][:10], '%Y-%m-%d')
                 open_date = due_date - timedelta(days=20)
-                # 若時間未到且目前沒條碼，顯示可用日期
                 if datetime.now() < open_date and not (payment_info.get('has_barcode') or payment_info.get('barcode_1')):
                     return f"Available after: {open_date.strftime('%Y-%m-%d')}"
             except Exception as date_e:
                 print(f"Date check error: {date_e}")
 
-        # --- 2. Token 驗證與處理 ---
-        if not session.get('token'):
+        # --- 2. Token 驗證與登入處理 ---
+        token = session.get('token')
+        if not token:
             re_login = requests.post(f"{PHP_API_URL}/login", json={"account": session['acc'], "password": session['pw']}, timeout=5)
             if re_login.status_code == 200:
-                session['token'] = re_login.json()['token']
-                session.modified = True
+                token = re_login.json()['token']
+                session['token'] = token
             else: 
                 return redirect(url_for('login'))
 
-        # --- 3. 正式索取條碼資料 ---
-        res = requests.post(f"{PHP_API_URL}/get-payment-url", 
-                            json={"payment_id": payment_id}, 
-                            headers={"Authorization": f"Bearer {session['token']}"}, 
-                            timeout=5)
-        
-        # 處理 401 Token 過期
-        if res.status_code == 401:
-            re_login = requests.post(f"{PHP_API_URL}/login", json={"account": session['acc'], "password": session['pw']}, timeout=5)
-            if re_login.status_code == 200:
-                session['token'] = re_login.json()['token']
-                session.modified = True
-                res = requests.post(f"{PHP_API_URL}/get-payment-url", json={"payment_id": payment_id}, headers={"Authorization": f"Bearer {session['token']}"}, timeout=5)
-            else: 
-                return redirect(url_for('login'))
+        # --- 3. 向 Laravel 請求條碼或跳轉連結 ---
+        res = requests.post(
+            f"{PHP_API_URL}/get-payment-url", 
+            json={"payment_id": payment_id}, 
+            headers={"Authorization": f"Bearer {token}"}, 
+            timeout=5
+        )
 
-        # --- 4. 解析資料並判定是否過期 ---
+        # --- 4. 解析回傳結果 (關鍵修改處) ---
         data = res.json()
+        print(f"DEBUG - Laravel Response: {data}")
+        # 💡 [關鍵：藍新模式] 偵測到跳轉指令，直接讓瀏覽器轉址到 Laravel 的渲染頁面
+        if data.get('type') == 'redirect':
+            pay_url = data.get('pay_url')
+            return redirect(pay_url)
+
+        # 💡 [速買配模式] 處理原本的 JSON 條碼顯示
         if res.status_code in [200, 400]:
             b = data.get('barcode')
-            if b and b.get('barcode_3'):
-                # --- 新增：判定條碼是否過期 ---
+            if b and b.get('barcode_1'):
+                # 判定條碼是否過期
                 b['is_expired'] = False
-                # 取得條碼截止日 (優先用 API 的 expired_at，否則用原始截止日)
                 expire_date_str = b.get('expired_at') or (payment_info.get('date') if payment_info else None)
-                
                 if expire_date_str:
                     try:
-                        # 轉為 datetime 物件，並設定為該日 23:59:59 為最終期限
                         expire_dt = datetime.strptime(expire_date_str[:10], '%Y-%m-%d').replace(hour=23, minute=59, second=59)
                         if datetime.now() > expire_dt:
                             b['is_expired'] = True
-                    except:
-                        pass
+                    except: pass
 
-                # 計算金額 (取 barcode_3 後五碼)
+                # 計算金額
                 try: 
                     b['amount'] = int(b['barcode_3'][-5:])
                 except: 
                     b['amount'] = 0
                     
-                # 渲染你剛才設定好的全英文 BARCODE_PAGE
                 return render_page(BARCODE_PAGE, b=b)
+
+        # --- 5. 錯誤處理與友善提示 ---
         error_msg = data.get('message', 'Unknown Error')
         
-        # 針對額度已滿 (trading control fail) 的友善提示
         if "trading control fail" in error_msg.lower():
-                    return render_page("""
-                        <div class="container text-center pt-4">
-                            <h3 class="fw-bold">Payment Notice</h3>
-                            <p class="mt-3">Barcode system is temporarily full.</p>                         
-                            <div class="alert alert-info py-3 my-4">
-                                <strong>Try these instead:</strong><br>
-                                1. Bank Transfer<br>
-                                2. <b>Pay In-Store</b> (Cash)<br>
-                                3. <b>Try again</b> in 2-3 days
-                            </div>
-                            <a href="/dashboard" class="btn btn-primary btn-lg w-100 py-3 shadow">Back to Dashboard</a>
-                        </div>
-                    """)
+            return render_page("""
+                <div class="container text-center pt-4">
+                    <h3 class="fw-bold">Payment Notice</h3>
+                    <p class="mt-3">Barcode system is temporarily full.</p>                                     
+                    <div class="alert alert-info py-3 my-4">
+                        <strong>Try these instead:</strong><br>
+                        1. Bank Transfer<br>
+                        2. <b>Pay In-Store</b> (Cash)<br>
+                        3. <b>Try again</b> in 2-3 days
+                    </div>
+                    <a href="/dashboard" class="btn btn-primary btn-lg w-100 py-3 shadow">Back to Dashboard</a>
+                </div>
+            """)
                     
         return f"Error: {error_msg}"
-       
+        
     except Exception as e: 
         print(f"Get Barcode Critical Error: {e}") 
         return "System Error"
 
-
 @app.route('/payment/callback/proxy', methods=['POST'])
 def payment_callback_proxy():
-
     try:
-        # 1. 取得速買配傳過來的 POST 資料 (這會包含 Smseid, Amount, 等參數)
-        smilepay_data = request.form.to_dict()
-        
-        # 如果是空的，代表這可能不是正確的 POST 請求
-        if not smilepay_data:
+        # 1. 抓取原始資料（避免 Flask 自動解析失敗）
+        raw_body = request.get_data()
+        raw_data = {}
+
+        # 2. 解析資料格式
+        if request.is_json or (raw_body and raw_body.startswith(b'{')):
+            # 處理 JSON 格式 (綠界新版 V2)
+            raw_data = json.loads(raw_body.decode('utf-8'))
+            is_json = True
+        else:
+            # 處理 Form 格式 (速買配 或 綠界舊版 V1)
+            raw_data = request.form.to_dict() or request.values.to_dict()
+            is_json = False
+
+        print(f"--- [DEBUG] Received Data: {raw_data} ---", flush=True)
+
+        if not raw_data:
             return "No data received", 400
 
- 
-        php_callback_url = f"{PHP_API_URL}/payment/callback"
+        # 3. 智慧判斷金流商與轉發路徑
+        # 速買配特徵：Smseid 或 Data_id
+        if 'Smseid' in raw_data or 'Data_id' in raw_data:
+            target_url = f"{PHP_API_URL}/payment/callback/smilepay"
+            forward_as_json = False # 速買配通常用 Form
         
-        # 使用 requests 發送 POST
-        php_response = requests.post(
-            php_callback_url, 
-            data=smilepay_data, 
-            timeout=10 # 設定超時避免卡死
-        )
+        # 綠界特徵：MerchantID 且包含 Data (V2) 或 CheckMacValue (V1)
+        elif 'MerchantID' in raw_data:
+            target_url = f"{PHP_API_URL}/payment/callback/ecpay"
+            forward_as_json = is_json # 根據原始格式決定
         
-        # PHP 那邊會回傳 "1|OK" 或 "0|BarcodeNotFound" 等字串
-        if php_response.status_code == 200:
-            if "1|OK" in php_response.text:
-                from flask import Response
-                return Response("SUCCESS", mimetype='text/plain')
-            else:
-                # 如果 PHP 回傳的是 0|Error 或其他訊息
-                print(f"PHP Logic Error: {php_response.text}")
-                return f"PHP processing failed: {php_response.text}", 200 
-                # 注意：這裡回傳 200 但內容不是標籤，SmilePay 就會視為失敗並補傳
         else:
-            # 如果 PHP 噴錯 (500 等)，回報給 Python Log
-            print(f"PHP API Error: {php_response.status_code} - {php_response.text}")
-            return f"Backend Error: {php_response.status_code}", 500
-            
+            print("Unknown provider pattern", flush=True)
+            return "Unknown provider", 400
+
+        # 4. 執行轉發
+        if forward_as_json:
+            php_response = requests.post(target_url, json=raw_data, timeout=15)
+        else:
+            php_response = requests.post(target_url, data=raw_data, timeout=15)
+
+        print(f"--- [DEBUG] PHP Response ({target_url}): {php_response.text} ---", flush=True)
+
+        return Response(php_response.text, mimetype='text/plain')
+
     except Exception as e:
-        print(f"Proxy Critical Error: {str(e)}")
+        print(f"Proxy Error: {str(e)}", flush=True)
         return "Internal Proxy Error", 500
         
 @app.route('/cancel_transfer', methods=['POST'])
