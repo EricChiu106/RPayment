@@ -1,5 +1,5 @@
 import os                          
-from flask import Flask, render_template_string, request, redirect, url_for, session, jsonify
+from flask import Flask, render_template_string, request, redirect, url_for, session, jsonify, Response
 import requests
 from datetime import datetime,  timedelta
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -8,6 +8,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import time
 from werkzeug.utils import secure_filename
+import json
 
 app = Flask(__name__)
 
@@ -894,64 +895,53 @@ def get_barcode(payment_id):
 
 @app.route('/payment/callback/proxy', methods=['POST'])
 def payment_callback_proxy():
-
     try:
-        # 1. 取得速買配傳過來的 POST 資料 (這會包含 Smseid, Amount, 等參數)
-        #raw_data = request.form.to_dict()
-        form_data = request.form.to_dict()
-        values_data = request.values.to_dict()
-        raw_body = request.get_data() # 這是最後的殺手鐧
+        # 1. 抓取原始資料（避免 Flask 自動解析失敗）
+        raw_body = request.get_data()
+        raw_data = {}
 
-        print("--- [DEBUG] Raw Body ---", flush=True)
-        print(raw_body, flush=True) # 如果這裡有印出字，代表資料有進來
+        # 2. 解析資料格式
+        if request.is_json or (raw_body and raw_body.startswith(b'{')):
+            # 處理 JSON 格式 (綠界新版 V2)
+            raw_data = json.loads(raw_body.decode('utf-8'))
+            is_json = True
+        else:
+            # 處理 Form 格式 (速買配 或 綠界舊版 V1)
+            raw_data = request.form.to_dict() or request.values.to_dict()
+            is_json = False
 
-        # 💡 2. 整合資料
-        raw_data = form_data or values_data
-        
-        # 💡 3. 如果 form_data 是空的但 raw_body 有東西，手動解析
-        if not raw_data and raw_body:
-            from urllib.parse import parse_qs
-            raw_data = {k: v[0] for k, v in parse_qs(raw_body.decode('utf-8')).items()}
+        print(f"--- [DEBUG] Received Data: {raw_data} ---", flush=True)
 
-        print("--- [DEBUG] Final Processed Data ---", flush=True)
-        print(raw_data, flush=True)
         if not raw_data:
             return "No data received", 400
-            
-       
-        if 'SmilePayNO' in raw_data or 'Smseid' in raw_data:
-            php_callback_url = f"{PHP_API_URL}/payment/callback/smilepay"      
-        elif 'CheckMacValue' in raw_data:   
-            php_callback_url = f"{PHP_API_URL}/payment/callback/ecpay"
-        else:
-            print(f"Unknown provider data: {raw_data}")
-            return "Unknown provider", 400
-            
-            
-        # 使用 requests 發送 POST
-        php_response = requests.post(
-            php_callback_url, 
-            data=raw_data, 
-            timeout=10 # 設定超時避免卡死
-        )
+
+        # 3. 智慧判斷金流商與轉發路徑
+        # 速買配特徵：Smseid 或 Data_id
+        if 'Smseid' in raw_data or 'Data_id' in raw_data:
+            target_url = f"{PHP_API_URL}/payment/callback/smilepay"
+            forward_as_json = False # 速買配通常用 Form
         
-        # PHP 那邊會回傳 "1|OK" 或 "0|BarcodeNotFound" 等字串
-        if php_response.status_code == 200:
-            if "1|OK" in php_response.text:
-                from flask import Response
-                return Response("1|OK", mimetype='text/plain')
-            else:
-                # 如果 PHP 回傳的是 0|Error 或其他訊息
-                print(f"PHP Logic Error: {php_response.text}")
-                return f"PHP processing failed: {php_response.text}", 200 
-                # 注意：這裡回傳 200 但內容不是標籤，SmilePay 就會視為失敗並補傳
+        # 綠界特徵：MerchantID 且包含 Data (V2) 或 CheckMacValue (V1)
+        elif 'MerchantID' in raw_data:
+            target_url = f"{PHP_API_URL}/payment/callback/ecpay"
+            forward_as_json = is_json # 根據原始格式決定
+        
         else:
-            # 如果 PHP 噴錯 (500 等)，回報給 Python Log
-            print(f"PHP API Error: {php_response.status_code} - {php_response.text}")
-            return f"Backend Error: {php_response.status_code}", 500
-            
+            print("Unknown provider pattern", flush=True)
+            return "Unknown provider", 400
+
+        # 4. 執行轉發
+        if forward_as_json:
+            php_response = requests.post(target_url, json=raw_data, timeout=15)
+        else:
+            php_response = requests.post(target_url, data=raw_data, timeout=15)
+
+        print(f"--- [DEBUG] PHP Response ({target_url}): {php_response.text} ---", flush=True)
+
+        return Response(php_response.text, mimetype='text/plain')
+
     except Exception as e:
-        print(f"Proxy Critical Error: {str(e)}")
+        print(f"Proxy Error: {str(e)}", flush=True)
         return "Internal Proxy Error", 500
         
 @app.route('/cancel_transfer', methods=['POST'])
