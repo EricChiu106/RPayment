@@ -897,11 +897,24 @@ def payment_callback_proxy():
 
     try:
         # 1. 取得速買配傳過來的 POST 資料 (這會包含 Smseid, Amount, 等參數)
-        raw_data = request.form.to_dict()
-        print("--- [DEBUG] Received Callback Data Start ---")
-        print(raw_data)
-        print("--- [DEBUG] Received Callback Data End ---")
-        # 如果是空的，代表這可能不是正確的 POST 請求
+        #raw_data = request.form.to_dict()
+        form_data = request.form.to_dict()
+        values_data = request.values.to_dict()
+        raw_body = request.get_data() # 這是最後的殺手鐧
+
+        print("--- [DEBUG] Raw Body ---", flush=True)
+        print(raw_body, flush=True) # 如果這裡有印出字，代表資料有進來
+
+        # 💡 2. 整合資料
+        raw_data = form_data or values_data
+        
+        # 💡 3. 如果 form_data 是空的但 raw_body 有東西，手動解析
+        if not raw_data and raw_body:
+            from urllib.parse import parse_qs
+            raw_data = {k: v[0] for k, v in parse_qs(raw_body.decode('utf-8')).items()}
+
+        print("--- [DEBUG] Final Processed Data ---", flush=True)
+        print(raw_data, flush=True)
         if not raw_data:
             return "No data received", 400
             
