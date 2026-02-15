@@ -27,7 +27,7 @@ limiter = Limiter(
 ALLOWED_EXTENSIONS = {'png','jpg','jpeg','gif'}
 UPLOAD_FOLDER = 'static/uploads'
 
-IS_LOCAL = True  # 在本機測試設為 True，搬到 AWS 設為 False
+IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
 
 # --- 伺服器端 Session 儲存目錄設定 ---
 session_dir = os.path.join(os.getcwd(), 'flask_session')
@@ -898,7 +898,9 @@ def payment_callback_proxy():
     try:
         # 1. 取得速買配傳過來的 POST 資料 (這會包含 Smseid, Amount, 等參數)
         raw_data = request.form.to_dict()
-        
+        print("--- [DEBUG] Received Callback Data Start ---")
+        print(raw_data)
+        print("--- [DEBUG] Received Callback Data End ---")
         # 如果是空的，代表這可能不是正確的 POST 請求
         if not raw_data:
             return "No data received", 400
