@@ -893,51 +893,7 @@ def get_barcode(payment_id):
         print(f"Get Barcode Critical Error: {e}") 
         return "System Error"
 
-@app.route('/payment/callback666/proxy', methods=['POST'])
-def payment_callback_proxy6():
-    try:
-        # 1. 抓取原始資料（避免 Flask 自動解析失敗）
-        raw_body = request.get_data()
-        raw_data = {}
 
-        # 2. 解析資料格式
-        if request.is_json or (raw_body and raw_body.startswith(b'{')):
-            # 處理 JSON 格式 (綠界新版 V2)
-            raw_data = json.loads(raw_body.decode('utf-8'))
-            is_json = True
-        else:
-            # 處理 Form 格式 (速買配 或 綠界舊版 V1)
-            raw_data = request.form.to_dict() or request.values.to_dict()
-            is_json = False
-
-        if not raw_data:
-            return "No data received", 400
-
-        # 3. 智慧判斷金流商與轉發路徑
-        # 速買配特徵：Smseid 或 Data_id
-        if 'Smseid' in raw_data or 'Data_id' in raw_data:
-            target_url = f"{PHP_API_URL}/payment/callback/smilepay"
-            forward_as_json = False # 速買配通常用 Form
-        
-        # 綠界特徵：MerchantID 且包含 Data (V2) 或 CheckMacValue (V1)
-        elif 'MerchantID' in raw_data:
-            target_url = f"{PHP_API_URL}/payment/callback/ecpay"
-            forward_as_json = is_json # 根據原始格式決定
-        
-        else:
-            print("Unknown provider pattern", flush=True)
-            return "Unknown provider", 400
-
-        # 4. 執行轉發
-        if forward_as_json:
-            php_response = requests.post(target_url, json=raw_data, timeout=15)
-        else:
-            php_response = requests.post(target_url, data=raw_data, timeout=15)  
-        return Response(php_response.text, mimetype='text/plain')
-
-    except Exception as e:
-        print(f"Proxy Error: {str(e)}", flush=True)
-        return "Internal Proxy Error", 500
         
 @app.route('/payment/callback/proxy', methods=['POST'])
 def payment_callback_proxy():
