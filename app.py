@@ -893,8 +893,8 @@ def get_barcode(payment_id):
         print(f"Get Barcode Critical Error: {e}") 
         return "System Error"
 
-@app.route('/payment/callback/proxy', methods=['POST'])
-def payment_callback_proxy():
+@app.route('/payment/callback666/proxy', methods=['POST'])
+def payment_callback_proxy6():
     try:
         # 1. 抓取原始資料（避免 Flask 自動解析失敗）
         raw_body = request.get_data()
@@ -909,8 +909,6 @@ def payment_callback_proxy():
             # 處理 Form 格式 (速買配 或 綠界舊版 V1)
             raw_data = request.form.to_dict() or request.values.to_dict()
             is_json = False
-
-        print(f"--- [DEBUG] Received Data: {raw_data} ---", flush=True)
 
         if not raw_data:
             return "No data received", 400
@@ -934,15 +932,58 @@ def payment_callback_proxy():
         if forward_as_json:
             php_response = requests.post(target_url, json=raw_data, timeout=15)
         else:
-            php_response = requests.post(target_url, data=raw_data, timeout=15)
-
-        print(f"--- [DEBUG] PHP Response ({target_url}): {php_response.text} ---", flush=True)
-
+            php_response = requests.post(target_url, data=raw_data, timeout=15)  
         return Response(php_response.text, mimetype='text/plain')
 
     except Exception as e:
         print(f"Proxy Error: {str(e)}", flush=True)
         return "Internal Proxy Error", 500
+        
+@app.route('/payment/callback/proxy', methods=['POST'])
+def payment_callback_proxy():
+    try:
+        # 1️⃣ 原始 body（完全不解析）
+        raw_body = request.get_data()
+
+        # 2️⃣ 原始 headers
+        content_type = request.headers.get("Content-Type", "")
+
+        # 3️⃣ 判斷金流（只用字串判斷，不解析）
+        body_text = raw_body.decode("utf-8", errors="ignore")
+
+        if "MerchantID" in body_text:
+            target_url = f"{PHP_API_URL}/payment/callback/ecpay"
+
+        elif "Smseid" in body_text or "Data_id" in body_text:
+            target_url = f"{PHP_API_URL}/payment/callback/smilepay"
+
+        else:
+            print("Unknown provider", flush=True)
+            return "Unknown provider", 400
+
+        # 4️⃣ 保留原始 Content-Type
+        headers = {
+            "Content-Type": content_type
+        }
+
+        # 5️⃣ 原封不動轉發
+        php_response = requests.post(
+            target_url,
+            data=raw_body,
+            headers=headers,
+            timeout=20
+        )
+
+        return Response(
+            php_response.text,
+            status=php_response.status_code,
+            mimetype="text/plain"
+        )
+
+    except Exception as e:
+        print(f"Proxy Error: {str(e)}", flush=True)
+        return "Proxy Error", 500        
+        
         
 @app.route('/cancel_transfer', methods=['POST'])
 def cancel_transfer():
