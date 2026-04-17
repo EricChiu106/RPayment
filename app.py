@@ -28,7 +28,7 @@ limiter = Limiter(
 ALLOWED_EXTENSIONS = {'png','jpg','jpeg','gif'}
 UPLOAD_FOLDER = 'static/uploads'
 
-IS_LOCAL = True  # 在本機測試設為 True， 正式 False
+IS_LOCAL = False  # 在本機測試設為 True， 正式 False
 
 # --- 伺服器端 Session 儲存目錄設定 ---
 session_dir = os.path.join(os.getcwd(), 'flask_session')
@@ -110,7 +110,7 @@ DASHBOARD_CONTENT = r"""
         <div class="d-flex align-items-center">
             <i class="fas fa-clock text-warning me-2"></i>
             <div class="small text-muted">
-                <b>Payment Notice:</b> Please pay in order. Once a barcode is generated, you must complete the payment within <b>30 days</b>. Verification takes 5-7 working days.
+                <b>Payment Notice:</b> Please pay in order. Once a barcode is generated, you must complete the payment within <b>30 days</b>. Verification takes 3-5 working days.
             </div>
         </div>
     </div>
@@ -177,9 +177,29 @@ DASHBOARD_CONTENT = r"""
                     </tbody>
                 </table>
             </div>
-            </div>
+        </div>
     </div>
     {% endfor %}
+</div>
+
+<div class="modal fade" id="barcodeConfirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow-lg" style="border-radius: 18px;">
+            <div class="modal-body text-center p-4">
+                <div class="mb-3">
+                    <i class="fas fa-exclamation-circle text-warning" style="font-size: 3.5rem;"></i>
+                </div>
+                <h5 class="fw-bold mb-3">Notice</h5>
+                <p class="text-muted mb-4" style="font-size: 0.85rem; line-height: 1.5;">
+                    Please complete the payment within <strong class="text-danger">30 days</strong> after generating the barcode.
+                </p>
+                <div class="d-flex justify-content-center gap-2">
+                    <button type="button" class="btn btn-light shadow-sm w-50" style="border-radius: 10px;" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary shadow-sm w-50 fw-bold" style="border-radius: 10px;" id="btn-proceed-barcode">Yes, Get it</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="modal fade" id="tutorialModal" tabindex="-1" aria-hidden="true">
@@ -211,10 +231,8 @@ DASHBOARD_CONTENT = r"""
                     <div class="badge bg-primary rounded-circle me-3 mt-1" style="width: 24px; height: 24px; min-width: 24px;">2</div>
                     <div class="w-100">
                         <h6 class="fw-bold mb-1">Pay at Convenience Store</h6>
-                        <p class="small text-muted mb-2">Present the 3 barcodes to the clerk. (7-11, FamilyMart, Hi-Life, OK Mart)</p>
-                        
+                        <p class="small text-muted mb-2">Present the 3 barcodes to the clerk.</p>
                         <img src="https://i.meee.com.tw/t6ZqMEX.jpg" class="d-block mb-2" style="height: 18px; opacity: 0.7;">
-                        
                         <div class="position-relative d-inline-block">
                             <img src="https://i.meee.com.tw/MqGGGHw.jpg" class="img-fluid rounded-3 shadow-sm border" style="max-height: 180px;">
                             <div class="position-absolute top-50 start-50 translate-middle w-100 text-center" style="pointer-events: none; transform: translate(-50%, -50%) rotate(-15deg);">
@@ -228,18 +246,13 @@ DASHBOARD_CONTENT = r"""
                     <div class="badge bg-primary rounded-circle me-3 mt-1" style="width: 24px; height: 24px; min-width: 24px;">3</div>
                     <div class="w-100">
                         <h6 class="fw-bold mb-1">Keep Receipt & Verification</h6>
-                        <p class="small text-muted mb-0">
-                            Please <b>keep your physical receipt</b> or take a photo and send it to our LINE. 
-                        </p>
-                        
+                        <p class="small text-muted mb-0">Please <b>keep your physical receipt</b> or take a photo and send it to our LINE.</p>
                         <div class="alert alert-danger p-2 mt-2 mb-2 border-0 shadow-sm" style="border-radius: 10px; font-size: 0.75rem;">
                             <i class="fas fa-exclamation-triangle me-1"></i>
-                            <b>DO NOT pay the same barcode twice.</b> If you need to make another payment, please wait for the first one to be verified before requesting a new barcode.
+                            <b>DO NOT pay the same barcode twice.</b> Wait for verification before requesting the next barcode.
                         </div>
-
                         <p class="small text-muted">
-                            <i class="fas fa-magic me-1 text-primary"></i> 
-                            Verification takes <b>3-5 working days</b>, and the system will automatically reconcile your balance.
+                            <i class="fas fa-magic me-1 text-primary"></i> Verification takes <b>3-5 working days</b>.
                         </p>
                     </div>
                 </div>
@@ -250,64 +263,71 @@ DASHBOARD_CONTENT = r"""
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="pwModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow" style="border-radius: 20px;">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-header-title fw-bold">Update Password</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="small fw-bold text-muted">New Password</label>
+                    <input type="password" id="new_pw" class="form-control py-2 shadow-sm" style="border-radius: 10px;" placeholder="Min 6 characters">
+                </div>
+                <div class="mb-3">
+                    <label class="small fw-bold text-muted">Confirm Password</label>
+                    <input type="password" id="confirm_pw" class="form-control py-2 shadow-sm" style="border-radius: 10px;" placeholder="Type again">
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-primary w-100 py-2 fw-bold shadow-sm" style="border-radius: 10px;" onclick="updatePassword()">Save New Password</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
-// 儲存準備要前往的 Barcode ID
 let pendingBarcodeSid = null;
 
-// 確認條碼邏輯
 window.confirmBarcode = function(sid, hasBarcode) {
     const alreadyHas = hasBarcode && hasBarcode !== '0' && hasBarcode !== 'None' && hasBarcode !== 'False' && hasBarcode !== '';
-
     if (alreadyHas) {
-        // 已有條碼，直接跳轉查看
         window.location.href = "/get_barcode/" + sid;
     } else {
-        // 記錄要索取的 SID
         pendingBarcodeSid = sid;
-        // 呼叫漂亮的有設計感 Modal
         var myModal = new bootstrap.Modal(document.getElementById('barcodeConfirmModal'));
         myModal.show();
     }
 };
 
-// 監聽漂亮 Modal 裡面的「Yes, Get it」按鈕
 document.addEventListener('DOMContentLoaded', function() {
     var proceedBtn = document.getElementById('btn-proceed-barcode');
     if (proceedBtn) {
         proceedBtn.addEventListener('click', function() {
             if (pendingBarcodeSid) {
-                // 按下確認後，鎖定按鈕避免重複點擊
                 this.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading...';
                 this.disabled = true;
-                // 跳轉前往取條碼
                 window.location.href = "/get_barcode/" + pendingBarcodeSid;
             }
         });
     }
 });
 
-// 修改密碼邏輯
 window.updatePassword = function() {
     var p1 = document.getElementById('new_pw').value;
     var p2 = document.getElementById('confirm_pw').value;
-    
     if (!p1 || p1.length < 6) return alert("Password must be at least 6 characters.");
     if (p1 !== p2) return alert("Passwords do not match.");
-    
     fetch('/update_password', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({password: p1})
     }).then(function(res) {
-        if (res.ok) { 
-            alert("Password updated successfully!"); 
-            location.reload(); 
-        } else { 
-            alert("Failed to update password. Please try again."); 
-        }
-    }).catch(function(err) {
-        alert("Network error. Please try again later.");
-    });
+        if (res.ok) { alert("Success!"); location.reload(); }
+        else { alert("Failed."); }
+    }).catch(err => alert("Network error."));
 };
 </script>
 """
