@@ -28,7 +28,7 @@ limiter = Limiter(
 ALLOWED_EXTENSIONS = {'png','jpg','jpeg','gif'}
 UPLOAD_FOLDER = 'static/uploads'
 
-IS_LOCAL = False  # 在本機測試設為 True， 正式 False
+IS_LOCAL = True  # 在本機測試設為 True， 正式 False
 
 # --- 伺服器端 Session 儲存目錄設定 ---
 session_dir = os.path.join(os.getcwd(), 'flask_session')
@@ -95,7 +95,10 @@ DASHBOARD_CONTENT = r"""
 <div class="container py-2" id="reconcile-app">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="fw-bold m-0">Hi, {{ session.get('name', 'Member') }}</h4>
-        <div>
+        <div class="d-flex align-items-center">
+            <button class="btn btn-sm btn-light text-primary fw-bold shadow-sm me-2" data-bs-toggle="modal" data-bs-target="#tutorialModal" style="border-radius: 8px; font-size: 0.75rem;">
+                <i class="fas fa-question-circle me-1"></i>How to Pay?
+            </button>
             <button class="btn btn-sm btn-outline-primary me-2 shadow-sm" data-bs-toggle="modal" data-bs-target="#pwModal" title="Change Password">
                 <i class="fas fa-key"></i>
             </button>
@@ -146,14 +149,10 @@ DASHBOARD_CONTENT = r"""
                         <td class="py-2 fw-bold text-nowrap">
                             ${{ "{:,.0f}".format(s.amount | float) }}
                         </td>
-
                         <td class="py-2 text-end pe-2">
                             {% if s.status == 'Paid' or s.status == '已支付' %}
                                 <div class="text-success fw-bold" style="font-size: 0.75rem;">
                                     <i class="fas fa-check-circle"></i> Paid
-                                </div>
-                                <div class="text-success" style="font-size: 0.65rem; margin-top: -2px;">
-                                    {{ s.actual_remittance_date[:10] if s.actual_remittance_date else '' }}
                                 </div>
                             {% else %}
                                 {% if flag.can_pay %}
@@ -178,66 +177,79 @@ DASHBOARD_CONTENT = r"""
                     </tbody>
                 </table>
             </div>
-
-            <div class="mt-3 pt-2 border-top d-flex justify-content-between align-items-center">
-                <small class="text-muted">               
-                    {% if order.balance <= 0 %}
-                        <span class="text-success fw-bold"><i class="fas fa-check-double me-1"></i>Finished</span>
-                    {% else %}
-                         Balance: <span class="text-danger fw-bold">${{ "{:,.0f}".format(order.balance) }}</span>
-                    {% endif %}
-                </small>
-                <small class="text-muted" style="font-size: 0.7rem;">Term: {{ order.period }}</small>
             </div>
-        </div>
     </div>
     {% endfor %}
 </div>
 
-<div class="modal fade" id="barcodeConfirmModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-sm">
-        <div class="modal-content border-0 shadow-lg" style="border-radius: 18px;">
-            <div class="modal-body text-center p-4">
-                <div class="mb-3">
-                    <i class="fas fa-exclamation-circle text-warning" style="font-size: 3.5rem;"></i>
-                </div>
-                <h5 class="fw-bold mb-3">Notice</h5>
-                <p class="text-muted mb-4" style="font-size: 0.85rem; line-height: 1.5;">
-                    Please complete the payment within <strong class="text-danger">30 days</strong> after generating the barcode.<br><br>               
-                </p>
-                <div class="d-flex justify-content-center gap-2">
-                    <button type="button" class="btn btn-light shadow-sm w-50" style="border-radius: 10px;" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary shadow-sm w-50 fw-bold" style="border-radius: 10px;" id="btn-proceed-barcode">Yes, Get it</button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="pwModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="tutorialModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content shadow" style="border-radius: 20px;">
+        <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
             <div class="modal-header border-0 pb-0">
-                <h5 class="modal-header-title fw-bold">Update Password</h5>
+                <h5 class="fw-bold"><i class="fas fa-book-open text-primary me-2"></i>How to Pay?</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <div class="mb-3">
-                    <label class="small fw-bold text-muted">New Password</label>
-                    <input type="password" id="new_pw" class="form-control py-2 shadow-sm" style="border-radius: 10px;" placeholder="Min 6 characters">
+                <div class="d-flex align-items-start mb-4">
+                    <div class="badge bg-primary rounded-circle me-3 mt-1" style="width: 24px; height: 24px; min-width: 24px;">1</div>
+                    <div class="w-100">
+                        <h6 class="fw-bold mb-1">Payment Methods</h6>
+                        <p class="small text-muted mb-2">
+                            You can pay in person at our store or use a Barcode at convenience stores. 
+                            <span class="d-block mt-1 fw-bold text-primary">Currently, these are the only two payment methods available.</span>
+                        </p>
+                        <div class="position-relative d-inline-block">
+                            <img src="https://i.meee.com.tw/T28jvI7.jpg" class="img-fluid rounded-3 shadow-sm border" style="max-height: 180px;">
+                            <div class="position-absolute top-50 start-50 translate-middle w-100 text-center" style="pointer-events: none; transform: translate(-50%, -50%) rotate(-15deg);">
+                                <span class="badge bg-danger opacity-75 py-1 px-2 shadow-sm" style="font-size: 0.7rem;">EXAMPLE ONLY</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="mb-3">
-                    <label class="small fw-bold text-muted">Confirm Password</label>
-                    <input type="password" id="confirm_pw" class="form-control py-2 shadow-sm" style="border-radius: 10px;" placeholder="Type again">
+
+                <div class="d-flex align-items-start mb-4">
+                    <div class="badge bg-primary rounded-circle me-3 mt-1" style="width: 24px; height: 24px; min-width: 24px;">2</div>
+                    <div class="w-100">
+                        <h6 class="fw-bold mb-1">Pay at Convenience Store</h6>
+                        <p class="small text-muted mb-2">Present the 3 barcodes to the clerk. (7-11, FamilyMart, Hi-Life, OK Mart)</p>
+                        
+                        <img src="https://i.meee.com.tw/t6ZqMEX.jpg" class="d-block mb-2" style="height: 18px; opacity: 0.7;">
+                        
+                        <div class="position-relative d-inline-block">
+                            <img src="https://i.meee.com.tw/MqGGGHw.jpg" class="img-fluid rounded-3 shadow-sm border" style="max-height: 180px;">
+                            <div class="position-absolute top-50 start-50 translate-middle w-100 text-center" style="pointer-events: none; transform: translate(-50%, -50%) rotate(-15deg);">
+                                <span class="badge bg-danger opacity-75 py-1 px-2 shadow-sm" style="font-size: 0.7rem;">EXAMPLE ONLY</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex align-items-start">
+                    <div class="badge bg-primary rounded-circle me-3 mt-1" style="width: 24px; height: 24px; min-width: 24px;">3</div>
+                    <div class="w-100">
+                        <h6 class="fw-bold mb-1">Keep Receipt & Verification</h6>
+                        <p class="small text-muted mb-0">
+                            Please <b>keep your physical receipt</b> or take a photo and send it to our LINE. 
+                        </p>
+                        
+                        <div class="alert alert-danger p-2 mt-2 mb-2 border-0 shadow-sm" style="border-radius: 10px; font-size: 0.75rem;">
+                            <i class="fas fa-exclamation-triangle me-1"></i>
+                            <b>DO NOT pay the same barcode twice.</b> If you need to make another payment, please wait for the first one to be verified before requesting a new barcode.
+                        </div>
+
+                        <p class="small text-muted">
+                            <i class="fas fa-magic me-1 text-primary"></i> 
+                            Verification takes <b>3-5 working days</b>, and the system will automatically reconcile your balance.
+                        </p>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer border-0">
-                <button type="button" class="btn btn-primary w-100 py-2 fw-bold shadow-sm" style="border-radius: 10px;" onclick="updatePassword()">Save New Password</button>
+                <button type="button" class="btn btn-primary w-100 fw-bold py-2" style="border-radius: 12px;" data-bs-dismiss="modal">Got it!</button>
             </div>
         </div>
     </div>
 </div>
-
 <script>
 // 儲存準備要前往的 Barcode ID
 let pendingBarcodeSid = null;
