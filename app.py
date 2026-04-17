@@ -28,7 +28,7 @@ limiter = Limiter(
 ALLOWED_EXTENSIONS = {'png','jpg','jpeg','gif'}
 UPLOAD_FOLDER = 'static/uploads'
 
-IS_LOCAL = False  # 在本機測試設為 True，搬到 AWS 設為 False
+IS_LOCAL = False  # 在本機測試設為 True， 正式 False
 
 # --- 伺服器端 Session 儲存目錄設定 ---
 session_dir = os.path.join(os.getcwd(), 'flask_session')
@@ -68,7 +68,7 @@ def render_page(template_body, **kwargs):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Member Payment System</title>
+        <title></title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
         <style>
@@ -107,7 +107,7 @@ DASHBOARD_CONTENT = r"""
         <div class="d-flex align-items-center">
             <i class="fas fa-clock text-warning me-2"></i>
             <div class="small text-muted">
-                <b>Payment Notice:</b> Verification takes <b>5-7 working days</b> after payment. Your status will update automatically.
+                <b>Payment Notice:</b> Please pay in order. Once a barcode is generated, you must complete the payment within <b>30 days</b>. Verification takes 5-7 working days.
             </div>
         </div>
     </div>
@@ -158,48 +158,13 @@ DASHBOARD_CONTENT = r"""
                             {% else %}
                                 {% if flag.can_pay %}
                                     <div class="text-end d-flex flex-column align-items-end">
-                                    {% if not s.has_report %}
-                                        {% if s.is_open or s.has_barcode or s.barcode_1 %}
-                                            <a href="/get_barcode/{{ s.id }}" 
-                                               class="btn btn-sm {% if (s.has_barcode and s.has_barcode != '0') or (s.barcode_1 and s.barcode_1 != '0') %}btn-success{% else %}btn-primary{% endif %} shadow-sm fw-bold mb-1 w-100"
-                                               style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px; min-width: 100px;">
-                                               <i class="fas {% if s.has_barcode or s.barcode_1 %}fa-eye{% else %}fa-magic{% endif %} me-1"></i>
-                                               {{ 'View Barcode' if (s.has_barcode and s.has_barcode != '0') or (s.barcode_1 and s.barcode_1 != '0') else 'Get Barcode' }}
-                                            </a>
-                                        {% else %}
-                                            <div class="text-muted mb-1" style="font-size: 0.6rem;">
-                                                <i class="fas fa-clock me-1"></i>Barcode: {{ s.open_date_str if s.open_date_str else 'Soon' }}
-                                            </div>
-                                        {% endif %}
-                                    {% endif %}
-                                        {% if s.has_report %}
-                                      <button class="btn btn-sm btn-outline-primary w-100 shadow-sm fw-bold" 
-                                            style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;"
-                                            onclick="viewSubmittedInfo('{{ order.order_no }}', '{{ s.amount }}', '{{ s.last_five if s.last_five else '' }}','{{ s.receipt_url }}')">
-                                        <i class="fas fa-info-circle me-1"></i> View Info
-                                    </button>
-                                                <div class="text-center mt-1">
-                                                <a href="javascript:void(0)" class="text-muted small text-decoration-underline" 
-                                                   onclick="cancelReport('{{ s.id }}')" style="font-size: 0.65rem;">
-                                                   Cancel
-                                                </a>
-                                            </div>
-                                            <div class="text-danger mt-1 fw-bold" style="font-size: 0.62rem; letter-spacing: -0.2px;">
-                                                   <i class="fas fa-exclamation-circle me-1"></i>Verification: 5-7 working days
-                                            </div>
-                                        {% else %}
-                                            <button class="btn btn-sm btn-outline-info fw-bold w-100 shadow-sm btn-trigger-transfer" 
-                                                    style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px;"
-                                                    data-bs-toggle="modal" 
-                                                    data-bs-target="#transferModal"
-                                                    data-order="{{ order.order_no }}"
-                                                    data-sid="{{ s.id }}"
-                                                    data-amount="{{ s.amount }}">
-                                                <i class="fas fa-university me-1"></i> Transfer
-                                            </button>
-                                        {% endif %}
-                                        
-                                        {% set flag.can_pay = false %}
+                                        <button onclick="confirmBarcode('{{ s.id }}', '{{ s.has_barcode or s.barcode_1 }}')" 
+                                                class="btn btn-sm {% if (s.has_barcode and s.has_barcode != '0') or (s.barcode_1 and s.barcode_1 != '0') %}btn-success{% else %}btn-primary{% endif %} shadow-sm fw-bold mb-1 w-100"
+                                                style="font-size: 0.7rem; padding: 2px 8px; border-radius: 6px; min-width: 100px;">
+                                            <i class="fas {% if s.has_barcode or s.barcode_1 %}fa-eye{% else %}fa-magic{% endif %} me-1"></i>
+                                            {{ 'View Barcode' if (s.has_barcode and s.has_barcode != '0') or (s.barcode_1 and s.barcode_1 != '0') else 'Get Barcode' }}
+                                        </button>
+                                        {% set flag.can_pay = false %} 
                                     </div>
                                 {% else %}
                                     <div class="text-end">
@@ -229,7 +194,25 @@ DASHBOARD_CONTENT = r"""
     {% endfor %}
 </div>
 
-
+<div class="modal fade" id="barcodeConfirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow-lg" style="border-radius: 18px;">
+            <div class="modal-body text-center p-4">
+                <div class="mb-3">
+                    <i class="fas fa-exclamation-circle text-warning" style="font-size: 3.5rem;"></i>
+                </div>
+                <h5 class="fw-bold mb-3">Notice</h5>
+                <p class="text-muted mb-4" style="font-size: 0.85rem; line-height: 1.5;">
+                    Please complete the payment within <strong class="text-danger">30 days</strong> after generating the barcode.<br><br>               
+                </p>
+                <div class="d-flex justify-content-center gap-2">
+                    <button type="button" class="btn btn-light shadow-sm w-50" style="border-radius: 10px;" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary shadow-sm w-50 fw-bold" style="border-radius: 10px;" id="btn-proceed-barcode">Yes, Get it</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="modal fade" id="pwModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -255,327 +238,78 @@ DASHBOARD_CONTENT = r"""
     </div>
 </div>
 
-
-<div class="modal fade" id="transferModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content shadow-lg" style="border-radius: 20px; border: none;">
-            <div class="modal-header border-0 pb-0">
-                <h5 class="fw-bold"><i class="fas fa-university text-primary me-2"></i>Transfer Info</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body text-start">
-                <div class="p-3 mb-3" style="background-color: #f0faff; border-radius: 12px; border: 1px dashed #0dcaf0;">
-                    <div class="small text-muted mb-1">Our Account:</div>
-                    <div class="fw-bold text-dark">
-                        Bank Name: <span class="text-primary">CTBC (822)</span><br>
-                       Account: <span class="text-primary" id="bank-account-num">129542011991</span>                       
-                        <button class="btn btn-sm p-0 ms-1 text-secondary" onclick="copyAccountNumber()" title="Copy Account">
-                            <i class="fas fa-copy" id="copy-icon"></i>
-                            <span id="copy-text" style="font-size: 0.65rem; display: none;" class="text-success fw-bold">Copied!</span>
-                        </button>     
-                          <div class="mt-2 mb-2 fw-bold" style="color: #0d6efd; font-size: 0.75rem; line-height: 1.4;">
-                            <i class="fas fa-camera me-1"></i>Done transfer? Please upload your receipt below.
-                            <div class="fw-normal text-muted" style="font-size: 0.65rem; margin-top: 2px;">
-                                (Not required for Barcode payments; it's verified automatically.)
-                            </div>
-                        </div>     
-                    </div> 
-                </div>
-                <input type="hidden" id="report_sid">
-                <div class="mb-3">
-                    <label class="small fw-bold text-muted">Order No.</label>
-                    <input type="text" id="report_order_no" class="form-control bg-light" readonly>
-                </div>
-                <div class="mb-3">
-                    <label class="small fw-bold text-muted">Amount Paid ($)</label>
-                    <input type="number" id="report_amount" class="form-control">
-                </div>
-                <div class="mb-3">
-                    <label class="small fw-bold text-muted">Your ATM Account Last 5 Digits</label>
-                    <input type="text" id="report_five" class="form-control" placeholder="e.g. 12345" maxlength="5">
-                    <div class="form-text text-muted" style="font-size: 0.7rem;">
-                        * For Cash Deposit, please enter <span class="fw-bold text-primary">00000</span>.
-                    </div>
-                </div>
-              <div class="mb-3">
-                <label class="small fw-bold text-danger mb-1 d-block">
-                    <i class="fas fa-camera me-1"></i>After transferring, please upload your receipt.
-                </label>
-                <div class="custom-file-upload">
-                    <input type="file" id="receipt_img" class="d-none" accept="image/*" 
-                           onchange="document.getElementById('file-status').innerText = 'Selected: ' + this.files[0].name">
-                    
-                    <label for="receipt_img" class="btn btn-outline-primary w-100 py-2 d-flex align-items-center justify-content-center" style="border-style: dashed;">
-                        <i class="fas fa-cloud-upload-alt me-2"></i>Choose Receipt Image
-                    </label>
-                    
-                    <div id="preview-wrapper" class="d-none mt-2 text-center">
-                        <img id="receipt-preview" src="" alt="Preview" class="img-thumbnail" style="max-height: 150px; border-radius: 8px;">
-                    </div>
-                    
-                    
-                    
-                    <div id="file-status" class="form-text text-muted text-center mt-1" style="font-size: 0.7rem;">
-                        No file chosen
-                    </div>
-                </div>   
-
-                
-            </div>
-
-            </div>
-            <div class="modal-footer border-0">
-                <button type="button" class="btn btn-primary w-100 py-3 fw-bold" id="btn-submit-payment" style="border-radius: 12px;">Submit</button>
-            </div>
-        </div>
-    </div>   
-</div>
-<div class="modal fade" id="receiptModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
-    <div class="modal-content" style="border-radius: 20px;">
-      <div class="modal-header border-0">
-        <h5 class="modal-title fw-bold">Payment Info</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p id="modalInfo"></p>
-        <img id="modalImg" src="" alt="Receipt Image" style="max-width: 320px; max-height: 400px; width: auto; height: auto; display:none; margin: 0 auto;" />
-      </div>
-      <div class="modal-footer border-0">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-      </div>
-    </div>
-  </div>
-</div>
-<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <script>
-let finalFileToUpload = null;
+// 儲存準備要前往的 Barcode ID
+let pendingBarcodeSid = null;
 
-document.getElementById('receipt_img').addEventListener('change', async function(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+// 確認條碼邏輯
+window.confirmBarcode = function(sid, hasBarcode) {
+    const alreadyHas = hasBarcode && hasBarcode !== '0' && hasBarcode !== 'None' && hasBarcode !== 'False' && hasBarcode !== '';
 
-    const subBtn = document.getElementById('btn-submit-payment');
-    const statusText = document.getElementById('file-status');
-    const previewWrapper = document.getElementById('preview-wrapper');
-    const previewImg = document.getElementById('receipt-preview');
-
-    // 1. 進入處理狀態：鎖定按鈕
-    if (subBtn) {
-        subBtn.disabled = true;
-        subBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>處理照片中...';
+    if (alreadyHas) {
+        // 已有條碼，直接跳轉查看
+        window.location.href = "/get_barcode/" + sid;
+    } else {
+        // 記錄要索取的 SID
+        pendingBarcodeSid = sid;
+        // 呼叫漂亮的有設計感 Modal
+        var myModal = new bootstrap.Modal(document.getElementById('barcodeConfirmModal'));
+        myModal.show();
     }
+};
 
-    let workingBlob = file;
-
-    // 2. 如果是 iPhone HEIC 格式，先轉成標準 Blob
-    if (file.type === "image/heic" || /\.heic$/i.test(file.name)) {
-        try {
-            console.log("Detecting HEIC, converting...");
-            workingBlob = await heic2any({
-                blob: file,
-                toType: "image/jpeg",
-                quality: 0.8
-            });
-            if (Array.isArray(workingBlob)) workingBlob = workingBlob[0];
-        } catch (err) {
-            console.error("HEIC Conversion Error:", err);
-        }
-    }
-
-    // 3. 使用 Canvas 進行尺寸壓縮 (Resize)
-    const img = new Image();
-    const reader = new FileReader();
-
-    reader.onload = function(event) {
-        img.src = event.target.result;
-        img.onload = function() {
-            const canvas = document.createElement('canvas');
-            let width = img.width;
-            let height = img.height;
-
-            // 限制最大邊長為 1280 像素，這能讓 5MB 照片變成 500KB 左右
-            const MAX_WIDTH_HEIGHT = 1280;
-            if (width > height) {
-                if (width > MAX_WIDTH_HEIGHT) {
-                    height *= MAX_WIDTH_HEIGHT / width;
-                    width = MAX_WIDTH_HEIGHT;
-                }
-            } else {
-                if (height > MAX_WIDTH_HEIGHT) {
-                    width *= MAX_WIDTH_HEIGHT / height;
-                    height = MAX_WIDTH_HEIGHT;
-                }
+// 監聽漂亮 Modal 裡面的「Yes, Get it」按鈕
+document.addEventListener('DOMContentLoaded', function() {
+    var proceedBtn = document.getElementById('btn-proceed-barcode');
+    if (proceedBtn) {
+        proceedBtn.addEventListener('click', function() {
+            if (pendingBarcodeSid) {
+                // 按下確認後，鎖定按鈕避免重複點擊
+                this.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading...';
+                this.disabled = true;
+                // 跳轉前往取條碼
+                window.location.href = "/get_barcode/" + pendingBarcodeSid;
             }
-
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, width, height);
-
-            // 轉成最終要上傳的 JPG Blob
-            canvas.toBlob(function(finalBlob) {
-                // 封裝成新的 File 物件供上傳
-                finalFileToUpload = new File([finalBlob], "receipt.jpg", { type: "image/jpeg" });
-
-                // 4. 更新預覽圖與 UI
-                previewImg.src = canvas.toDataURL('image/jpeg');
-                previewWrapper.classList.remove('d-none');
-
-                if (subBtn) {
-                    subBtn.disabled = false;
-                    subBtn.innerHTML = 'Submit';
-                }
-                
-                // 顯示壓縮後的資訊供確認
-                const fileSizeMB = (finalBlob.size / 1024 / 1024).toFixed(2);
-                console.log("Image optimized for upload:", finalFileToUpload);
-            }, 'image/jpeg', 0.7); // 0.7 是品質壓縮比
-        };
-    };
-    reader.readAsDataURL(workingBlob);
+        });
+    }
 });
 
-window.viewSubmittedInfo = function(orderNo, amount, lastFive, imgUrl = null) {
-
-    var lastDigits = (lastFive && lastFive !== 'None') ? lastFive : "Not provided";
-    var displayAcc = lastDigits === "00000" ? "00000 (Cash Deposit)" : lastDigits;
-    var infoMsg = `----------------------------
-Order No: ${orderNo}
-Amount Paid: $${Number(amount).toLocaleString()}
-Your Account Last 5 Digits: ${displayAcc}
-----------------------------
-`;
-
-    document.getElementById('modalInfo').innerText = infoMsg;
-
-    if (imgUrl) {
-        document.getElementById('modalImg').src = imgUrl;
-        document.getElementById('modalImg').style.display = 'block';
-    } else {
-        document.getElementById('modalImg').style.display = 'none';
-    }
-
-    var modal = new bootstrap.Modal(document.getElementById('receiptModal'));
-    modal.show();
-}
-
-
-
-
-
-
-function cancelReport(id) {
-    if (!confirm("Are you sure you want to cancel?")) return;
-    fetch('/cancel_transfer', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({schedule_id: id})
-    }).then(function(res) {
-        if (res.ok) {
-            alert("Cancelled!");
-            location.reload();
-        } else {
-            alert("Failed to cancel.");
-        }
-    }).catch(function(err) {
-        alert("Error: " + err);
-    });
-}
-
-function updatePassword() {
+// 修改密碼邏輯
+window.updatePassword = function() {
     var p1 = document.getElementById('new_pw').value;
     var p2 = document.getElementById('confirm_pw').value;
-    if (!p1 || p1.length < 6) return alert("Min 6 characters");
-    if (p1 !== p2) return alert("Passwords mismatch");
+    
+    if (!p1 || p1.length < 6) return alert("Password must be at least 6 characters.");
+    if (p1 !== p2) return alert("Passwords do not match.");
+    
     fetch('/update_password', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({password: p1})
     }).then(function(res) {
-        if (res.ok) { alert("Success!"); location.reload(); }
-        else { alert("Failed"); }
-    });
-}
-
-function copyAccountNumber() {
-    var acc = document.getElementById('bank-account-num').innerText;
-    navigator.clipboard.writeText(acc).then(function() {
-        document.getElementById('copy-icon').style.display = 'none';
-        document.getElementById('copy-text').style.display = 'inline';
-        setTimeout(function() {
-            document.getElementById('copy-icon').style.display = 'inline';
-            document.getElementById('copy-text').style.display = 'none';
-        }, 1500);
-    });
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    var app = document.getElementById('reconcile-app');
-    if (app) {
-        app.addEventListener('click', function(e) {
-            var btn = e.target.closest('.btn-trigger-transfer');
-            if (btn) {
-                document.getElementById('report_order_no').value = btn.getAttribute('data-order');
-                document.getElementById('report_sid').value = btn.getAttribute('data-sid');
-                document.getElementById('report_amount').value = btn.getAttribute('data-amount');
-                document.getElementById('report_five').value = '';
-            }
-        });
-    }
-
-    var subBtn = document.getElementById('btn-submit-payment');
-
-if (subBtn) {
-    subBtn.addEventListener('click', function() {
-        var schedule_id = document.getElementById('report_sid').value;
-        var order_no = document.getElementById('report_order_no').value;
-        var amount = document.getElementById('report_amount').value;
-        var last_five = document.getElementById('report_five').value;
-
-        if (!amount || last_five.length !== 5) return alert("Check amount or last 5 digits");
-
-        var fd = new FormData();
-        fd.append('schedule_id', schedule_id);
-        fd.append('order_no', order_no);
-        fd.append('amount', amount);
-        fd.append('last_five', last_five);
-
-        // 【關鍵修改】優先使用我們轉好的 finalFileToUpload
-        // 如果沒有（例如沒選照片），則嘗試從 input 抓
-        var fileToUse = finalFileToUpload || document.getElementById('receipt_img').files[0];
-        
-        if (fileToUse) {
-            fd.append('receipt_img', fileToUse);
+        if (res.ok) { 
+            alert("Password updated successfully!"); 
+            location.reload(); 
+        } else { 
+            alert("Failed to update password. Please try again."); 
         }
-
-        fetch('/submit_transfer', {
-            method: 'POST',
-            body: fd
-        }).then(function(res) {
-            if (res.ok) {
-                alert("Success!");
-                location.reload();
-            } else {
-                // 如果失敗，看看後端回傳什麼
-                res.json().then(data => {
-                    alert("Failed: " + (data.message || "Unknown error"));
-                });
-            }
-        }).catch(err => {
-            console.error("Fetch error:", err);
-            alert("Network error, please try again.");
-        });
+    }).catch(function(err) {
+        alert("Network error. Please try again later.");
     });
-}
-});
-
+};
 </script>
 """
 
 
 BARCODE_PAGE = """
-<div class="container py-2">
+<style>
+    /* 確保條碼在小螢幕手機上不會破版被截斷 */
+    .barcode-svg {
+        max-width: 100%;
+        height: auto;
+    }
+</style>
+<div class="container py-2" id="reconcile-app">
     {# --- Condition 1: If Barcode is Expired --- #}
     {% if b.is_expired %}
     <div class="card shadow border-0 p-4 text-center" style="border-radius: 20px; margin-top: 50px;">
@@ -584,12 +318,12 @@ BARCODE_PAGE = """
             <h4 class="fw-bold text-dark">Barcode Expired</h4>
             <p class="text-muted small px-3">This barcode has passed its payment deadline and is no longer valid for transaction.</p>
             
-            <div class="alert alert-danger border-0 small mt-4 mx-2 fw-bold" style="border-radius: 12px; background-color: #fff5f5; color: #e53e3e;">
-                <i class="fas fa-headset me-1"></i> CONTACT CUSTOMER SERVICE
-            </div>
-
             <div class="px-3 mt-4">
-                <button onclick="goBack()" class="btn btn-outline-secondary w-100 py-2 small border-0">
+                <a href="https://line.me/R/ti/p/你的LINE_ID" target="_blank" class="btn btn-danger w-100 py-2 fw-bold shadow-sm mb-3" style="border-radius: 12px; background-color: #e53e3e; border: none;">
+                    <i class="fas fa-headset me-2"></i> CONTACT CUSTOMER SERVICE
+                </a>
+                
+                <button onclick="goBack()" class="btn btn-light w-100 py-2 small fw-bold text-secondary border-0" style="border-radius: 12px; background-color: #f1f3f5;">
                     Back to Order List
                 </button>
             </div>
@@ -598,40 +332,51 @@ BARCODE_PAGE = """
 
     {# --- Condition 2: Normal Display --- #}
     {% else %}
-    <div class="text-center mb-4">
-        <p class="text-danger small fw-bold">
-            <i class="fas fa-sun me-1"></i>Please turn your screen brightness to maximum and present this to the clerk.
+    
+    <div class="alert text-center border-0 py-2 mb-3 shadow-sm" style="background-color: #fff4e5; color: #d97706; border-radius: 10px;">
+        <p class="small fw-bold mb-0">
+            <i class="fas fa-sun me-2 fa-spin-hover"></i>Please turn screen brightness to MAXIMUM.
         </p>
     </div>
-    <div class="notice-box p-3 mb-4 shadow-sm" style="background-color: #f8f9fa; border-radius: 15px; border-left: 4px solid #ffc107;">
+
+    <div class="notice-box p-3 mb-3 shadow-sm" style="background-color: #f8f9fa; border-radius: 15px; border-left: 4px solid #ffc107;">
         <h6 class="fw-bold text-dark mb-2"><i class="fas fa-info-circle text-warning me-1"></i> Payment Notice</h6>
         <ul class="small text-muted mb-0 ps-3">
-            <li class="mb-2">After payment, please <b>take a photo of the receipt</b> and send to our <b>LINE</b>.</li>
-            <li class="mb-2 text-danger">Verification takes <b>5 to 7 working days</b>.</li>
-            <li>Status will <b>automatically update</b>. Thank you!</li>
+            <li class="mb-1">After payment, please <b>take a photo of the receipt</b> and send to our <b>LINE</b>.</li>
+            <li class="mb-1 text-danger">Verification takes <b>5 to 7 working days</b>.</li>
+            <li>Status will <b>automatically update</b>.</li>
         </ul>
     </div>
-    <div class="card mb-3 border-0 shadow-sm" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px;">
+
+    <div class="card mb-3 border-0 shadow-sm" style="background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%); border-radius: 15px;">
         <div class="card-body text-center text-white py-3">
-            <div class="small opacity-75">Total Amount</div>
-            <div class="fs-2 fw-bold">${{ "{:,.0f}".format(b.amount | float) }}</div>
+            <div class="small opacity-75 mb-1">Total Amount</div>
+            <div class="fs-1 fw-bold" style="letter-spacing: 1px;">${{ "{:,.0f}".format(b.amount | float) }}</div>
         </div>
     </div>
 
-    <div class="card p-3 mb-4 shadow border-0" style="border-radius: 20px;">
-        <div class="text-center mb-4"><svg id="barcode1"></svg><div class="fw-bold small">{{ b.barcode_1 }}</div></div>
-        <div class="text-center mb-4"><svg id="barcode2"></svg><div class="fw-bold small">{{ b.barcode_2 }}</div></div>
-        <div class="text-center mb-4"><svg id="barcode3"></svg><div class="fw-bold small">{{ b.barcode_3 }}</div></div>
-        <div class="mt-2 text-center border-top pt-3">
-            <div class="text-danger fw-bold small">Payment Deadline</div>
+    <div class="card p-4 mb-4 shadow border-0" style="border-radius: 20px;">
+        <div class="text-center mb-4">
+            <svg id="barcode1" class="barcode-svg"></svg>
+            <div class="fw-bold small text-muted" style="letter-spacing: 2px;">{{ b.barcode_1 }}</div>
+        </div>
+        <div class="text-center mb-4">
+            <svg id="barcode2" class="barcode-svg"></svg>
+            <div class="fw-bold small text-muted" style="letter-spacing: 2px;">{{ b.barcode_2 }}</div>
+        </div>
+        <div class="text-center mb-2">
+            <svg id="barcode3" class="barcode-svg"></svg>
+            <div class="fw-bold small text-muted" style="letter-spacing: 2px;">{{ b.barcode_3 }}</div>
+        </div>
+        
+        <div class="mt-4 text-center border-top border-2 border-dashed pt-3">
+            <div class="text-danger fw-bold small text-uppercase tracking-wide mb-1">Payment Deadline</div>
             <div class="fs-5 fw-bold text-dark">{{ b.expired_at }}</div>
         </div>
     </div>
 
-
-
     <div class="px-2 mb-5">
-        <button onclick="goBack()" class="btn btn-outline-primary w-100 py-3 fw-bold rounded-3 shadow-sm">
+        <button onclick="goBack()" class="btn btn-outline-primary w-100 py-3 fw-bold shadow-sm" style="border-radius: 12px;">
             <i class="fas fa-arrow-left me-2"></i>Back to Order List
         </button>
     </div>
@@ -640,16 +385,28 @@ BARCODE_PAGE = """
 
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script>
-    {# Render barcodes only if NOT expired #}
     {% if not b.is_expired %}
-    const opt = { format: "CODE39", width: 1, height: 60, displayValue: false, margin: 10 };
-    JsBarcode("#barcode1", "{{ b.barcode_1 }}", opt);
-    JsBarcode("#barcode2", "{{ b.barcode_2 }}", opt);
-    JsBarcode("#barcode3", "{{ b.barcode_3 }}", opt);
+    // 優化：將 width 從 1 提升到 1.8，增加超商掃描槍的辨識率
+    // margin 增加到 15 確保條碼兩側有足夠的留白 (Quiet Zone)
+    const opt = { 
+        format: "CODE39", 
+        width: 1.8, 
+        height: 65, 
+        displayValue: false, 
+        margin: 15,
+        background: "#ffffff",
+        lineColor: "#000000"
+    };
+    
+    // 使用 setTimeout 確保 DOM 載入後再渲染，避免偶發的渲染失敗
+    setTimeout(() => {
+        JsBarcode("#barcode1", "{{ b.barcode_1 }}", opt);
+        JsBarcode("#barcode2", "{{ b.barcode_2 }}", opt);
+        JsBarcode("#barcode3", "{{ b.barcode_3 }}", opt);
+    }, 100);
     {% endif %}
 
     function goBack() {
-        // Redirect with timestamp to force dashboard refresh
         window.location.href = '/dashboard?t=' + new Date().getTime();
     }
 </script>
@@ -659,7 +416,7 @@ LOGIN_CONTENT = """
 <div class="row justify-content-center mt-5">
     <div class="col-md-5 col-12">     
         <div class="card p-4 shadow-sm" style="border-radius: 20px;">
-            <h3 class="text-center mb-4 fw-bold">Member Login</h3>
+            <h3 class="text-center mb-4 fw-bold">Login</h3>
             {% if error %}<div class="alert alert-danger py-2 small">{{ error }}</div>{% endif %}
             <form method="POST" action="/login" id="loginForm">
                 <div class="mb-3">
@@ -728,6 +485,8 @@ def login():
             return render_page(LOGIN_CONTENT, error="Connection Error")
     return render_page(LOGIN_CONTENT, error=None)
 
+
+
 @app.route('/dashboard')
 def dashboard():
     if not session.get('acc') or not session.get('pw'):
@@ -753,34 +512,24 @@ def dashboard():
         orders = res.json().get('orders', [])
 
         # --- 處理日期與條碼顯示邏輯 ---
-        now = datetime.now()
         for order in orders:
             for s in order.get('payment_schedule', []):
                 s['last_five'] = s.get('last_five', '')
-                # 1. 檢查是否已經有條碼資料 (排除空值、None 或字串 '0')
+                
+                # 1. 檢查是否已經有條碼資料 (保留判斷，供前端區分 View/Get)
                 has_existing_code = bool(s.get('barcode_1') and s.get('barcode_1') != '0') or \
                                     bool(s.get('has_barcode') and s.get('has_barcode') != '0')
-
+                
+                # 2. 隨時開放領取 (解除 20 天限制，讓前端 flag 決定順序即可)
+                s['is_open'] = True
+                
+                # 3. 處理日期顯示字串
                 if s.get('date'):
-                    try:
-                        # 轉換日期字串為 datetime 物件
-                        due_date = datetime.strptime(s['date'][:10], '%Y-%m-%d')
-                        # 計算開放日期 (截止前 20 天)
-                        open_date = due_date - timedelta(days=20)
-                        
-                        # 邏輯：(現在時間到了) OR (已經有條碼了) 都要開放按鈕
-                        s['is_open'] = (now >= open_date) or has_existing_code
-                        s['open_date_str'] = open_date.strftime('%Y-%m-%d')
-                    except:
-                        s['is_open'] = has_existing_code
-                        s['open_date_str'] = 'Pending'
+                    s['open_date_str'] = s['date'][:10]
                 else:
-                    # 沒有日期時，僅依據是否有條碼來決定是否開放
-                    s['is_open'] = has_existing_code
                     s['open_date_str'] = 'Pending'
-        # -----------------------
-        
-        # 存入 session 備用（供 get_barcode 檢查用）
+
+        # 存入 session 備用 (請確保縮排在 for 迴圈外)
         session['orders'] = orders
         session.modified = True
 
@@ -811,16 +560,17 @@ def get_barcode(payment_id):
                     break
             if payment_info: break
 
-        # 20天開放期攔截邏輯
-        if payment_info and payment_info.get('date'):
-            try:
-                due_date = datetime.strptime(payment_info['date'][:10], '%Y-%m-%d')
-                open_date = due_date - timedelta(days=20)
-                if datetime.now() < open_date and not (payment_info.get('has_barcode') or payment_info.get('barcode_1')):
-                    return f"Available after: {open_date.strftime('%Y-%m-%d')}"
-            except Exception as date_e:
-                print(f"Date check error: {date_e}")
-
+        
+        # --- 取消 20 天開放期攔截邏輯 (2026-04 依需求移除) ---
+        # if payment_info and payment_info.get('date'):
+        #     try:
+        #         due_date = datetime.strptime(payment_info['date'][:10], '%Y-%m-%d')
+        #         open_date = due_date - timedelta(days=20)
+        #         if datetime.now() < open_date and not (payment_info.get('has_barcode') or payment_info.get('barcode_1')):
+        #             return f"Available after: {open_date.strftime('%Y-%m-%d')}"
+        #     except Exception as date_e:
+        #         print(f"Date check error: {date_e}")
+        
         # --- 2. Token 驗證與登入處理 ---
         token = session.get('token')
         if not token:
@@ -841,7 +591,7 @@ def get_barcode(payment_id):
 
         # --- 4. 解析回傳結果 (關鍵修改處) ---
         data = res.json()
-        print(f"DEBUG - Laravel Response: {data}")
+  
         # 💡 [關鍵：藍新模式] 偵測到跳轉指令，直接讓瀏覽器轉址到 Laravel 的渲染頁面
         if data.get('type') == 'redirect':
             pay_url = data.get('pay_url')
