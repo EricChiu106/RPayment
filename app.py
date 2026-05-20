@@ -60,6 +60,13 @@ Session(app)
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.',1)[1].lower() in ALLOWED_EXTENSIONS
     
+
+@app.route("/w")
+def warranty_redirect():
+    # 307 代表暫時導向，對這種隨時會更新檔案的轉址最合適
+    return redirect(f'/static/docs/warranty.pdf?v=1.0')
+
+
     
 def render_page(template_body, **kwargs):
     html_layout = f"""
@@ -753,10 +760,11 @@ def cancel_transfer():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
  
 @app.route('/submit_transfer', methods=['POST'])
 def submit_transfer():
-    # 1. 讀 form
+    # 1. 讀 form 資料
     schedule_id = request.form.get('schedule_id')
     order_no = request.form.get('order_no')
     amount = request.form.get('amount')
@@ -772,30 +780,14 @@ def submit_transfer():
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Invalid data format"}), 400
 
-    # 2. 讀圖片
-    receipt_file = request.files.get('receipt_img')
-    if receipt_file:
-        if not allowed_file(receipt_file.filename):
-            return jsonify({"status": "error", "message": "Invalid image type"}), 400
+    # 2. 移除圖片處理邏輯 (目前不開放上傳，關閉此攻擊面)
 
-        filename = secure_filename(receipt_file.filename)
-        filename = f"{order_no}_{schedule_id}_{int(time.time())}_{filename}"
-        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-        save_path = os.path.join(UPLOAD_FOLDER, filename)
-        receipt_file.save(save_path)
-
-        # 加到 payload 裡 (如果 PHP API 需要)
-        # 你可以改成傳送 file
-        files = {'receipt_img': open(save_path, 'rb')}
-    else:
-        files = None
-
-    # 3. 傳到 PHP API
+    # 3. 將文字資料傳到 PHP API
     try:
         response = requests.post(
             f"{PHP_API_URL}/save-transfer-report",
             data=payload,
-            files=files,
+            # 這裡把 files=files 拿掉了，單純送 data
             headers={"Authorization": f"Bearer {session.get('token')}"},
             timeout=10
         )
@@ -809,21 +801,56 @@ def submit_transfer():
     except requests.exceptions.Timeout:
         return jsonify({"status": "error", "message": "Connection timeout"}), 504
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        # 安全性優化：不要把後端真實錯誤 (str(e)) 直接印給前端看，避免曝露系統資訊
+        print(f"Submit Transfer Error: {str(e)}") # 留在終端機或寫入 Log 供開發者排錯
+        return jsonify({"status": "error", "message": "伺服器內部錯誤，請稍後再試"}), 500
         
         
         
     
+
+
 @app.route('/update_password', methods=['POST'])
 def update_password():
-    if not session.get('token'): return {"message": "Unauthorized"}, 401
+    # 1. 檢查是否已登入
+    if not session.get('token'): 
+        return jsonify({"message": "Unauthorized"}), 401
+    
+    # 2. 檢查前端是否有傳送密碼
+    data = request.json
+    if not data or not data.get('password'):
+        return jsonify({"message": "密碼不得為空"}), 400
+
     try:
-        res = requests.post(f"{PHP_API_URL}/update-password", json=request.json, headers={"Authorization": f"Bearer {session['token']}"}, timeout=5)
+        # 3. 為了安全，只挑出需要的欄位往後送，過濾掉不明參數
+        payload = {"password": data.get('password')}
+        
+        res = requests.post(
+            f"{PHP_API_URL}/update-password", 
+            json=payload, 
+            headers={"Authorization": f"Bearer {session['token']}"}, 
+            timeout=5
+        )
+        
+        # 4. 成功修改後，清空 session 讓使用者重新登入
         if res.status_code == 200:
             session.clear()
-            return {"message": "Success"}, 200
-        return res.json(), res.status_code
-    except: return {"message": "Error"}, 500
+            return jsonify({"message": "Success"}), 200
+            
+        # 5. 避免 PHP 端發生 500 錯誤回傳 HTML 時，res.json() 造成系統崩潰
+        try:
+            error_data = res.json()
+        except ValueError:
+            error_data = {"message": "PHP Server Error"}
+            
+        return jsonify(error_data), res.status_code
+        
+    except requests.exceptions.Timeout:
+        return jsonify({"message": "連線逾時，請稍後再試"}), 504
+    except Exception as e:
+        # 6. 例外錯誤不拋給前端看，記錄在後台即可
+        print(f"Update Password Error: {str(e)}")
+        return jsonify({"message": "伺服器內部錯誤"}), 500
 
 @app.route('/logout')
 def logout():
