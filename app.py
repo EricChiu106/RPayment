@@ -630,7 +630,11 @@ def get_barcode(payment_id):
         )
 
         # --- 4. 解析回傳結果 (關鍵修改處) ---
-        data = res.json()
+        try:
+            data = res.json()
+        except Exception:
+            print("NOT JSON RESPONSE:", res.text)
+            return "API Error (Invalid JSON)"
   
         # 💡 [關鍵：藍新模式] 偵測到跳轉指令，直接讓瀏覽器轉址到 Laravel 的渲染頁面
         if data.get('type') == 'redirect':
